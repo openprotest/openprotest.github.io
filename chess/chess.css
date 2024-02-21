@@ -1,0 +1,123 @@
+.chess-board {
+    position: absolute;
+    z-index: 1;
+    transition: left .1s;
+}
+
+.chess-square {
+    position: absolute;
+    width: 12.5%;
+    height: 12.5%;
+    transition: .2s
+}
+
+.chess-piece {
+    position: absolute;
+    width: 12.5%;
+    height: 12.5%;
+    background-size: contain;
+    background-repeat: no-repeat;
+    transition: .4s cubic-bezier(.2,.8,.3,1.2);
+
+    /*cursor: url(openhand.svg) 12 12, auto;*/
+}
+
+/*.chess-piece:active {
+    cursor: url(closedhand.svg) 12 12, auto;
+}*/
+
+.chess-move-indicator {
+    width: 30%;
+    height: 30%;
+    margin: 35%;
+    background-color: rgb(192,192,192);
+    border-radius: 50%;
+    opacity: 50%;
+
+    animation: chess-fadein .4s;
+}
+
+.chess-coord {
+    position: absolute;
+    width: 20px;
+    height: 24px;
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+    transition: .4s;
+}
+
+.chess-sidepanel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 250px;
+    background-color: rgb(72,72,72);
+    transition: .2s;
+}
+
+.chess-moveslist {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 8px;
+    bottom: 8px;
+    overflow-y: scroll;
+}
+
+.chess-move {
+    float: left;    
+    width: 80px;
+    padding: 4px 4px;
+    margin: 4px 8px;
+    border-radius: 4px;
+}
+
+.chess-move:hover {
+    background-color: rgb(84,84,84);
+}
+
+.chess-move:active {
+    background-color: rgb(88,88,88);
+}
+
+.chess-cover {
+    background-color: rgba(64,64,64,.4);
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 4;
+}
+
+.chess-cover > div {
+    background-color: var(--pane-color);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    min-height: 100px;
+    margin: 32px auto;
+    padding: 8px;
+}
+
+.chess-cover > div > div {
+    float: left;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    border-radius: 8px;
+    width: 25%;
+    height: 100px;
+    transition: .2s;
+}
+
+.chess-cover > div > div:active {
+    background-color: var(--clr-accent);
+}
+
+@keyframes chess-fadein {
+    0%   { transform: scale(.9); filter: opacity(0) }
+    100% { transform: none;      filter: none }
+}

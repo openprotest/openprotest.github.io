@@ -1,0 +1,16 @@
+{
+	"name": "Pro-test lite",
+	"short_name": "Pro-test",
+	"description": "",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#202020",
+	"theme_color": "#ff7900",
+	"icons": [
+		{
+			"src": "logo.png",
+			"sizes": "192x192",
+			"type": "image/png"
+		}
+	]
+}
