@@ -236,7 +236,7 @@ class MicTester extends Window {
 			this.audioContext.close();
 			this.audioContext = null;
 		}
-		
+
 		this.infoBox.textContent = "";
 		this.recordButton.disabled = false;
 		this.startButton.disabled = false;

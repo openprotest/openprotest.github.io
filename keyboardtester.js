@@ -754,7 +754,7 @@ class KeyboardTester extends Window {
 					elements[i].style.boxShadow = "none";
 				}
 			}
-	
+
 			elements[4].style.transform = `scaleY(${gamepad.buttons[4].pressed ? ".8" : "1"})`;
 			elements[5].style.transform = `scaleY(${gamepad.buttons[5].pressed ? ".8" : "1"})`;
 			elements[6].style.transform = `rotateX(${gamepad.buttons[6].value * 70}deg)`;

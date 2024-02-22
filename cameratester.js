@@ -181,7 +181,7 @@ class CameraTester extends Window {
 					height: { min: 480, ideal: 1080, max: 2160 }
 				}
 			});
-			
+
 			const videoTrack = this.stream.getVideoTracks()[0];
 			const videoSettings = videoTrack.getSettings();
 			videoTrack.onended = ()=> this.Stop();
