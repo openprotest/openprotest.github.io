@@ -708,10 +708,9 @@ contextmenu.onblur = ()=> {
 	const timeMapping = { 1: 15, 2: 30, 3: 60, 4: 2 * 60, 5: 4 * 60, 6: 8 * 60, 7: 24 * 60, 8: Infinity };
 	const index = localStorage.getItem("session_timeout") == null ? 1 : parseInt(localStorage.getItem("session_timeout"));
 
-	if ((Date.now() - UI.lastActivity) > 60 * 1000 * timeMapping[index]) {
-		fetch("/logout")
-			.then(response=> { if (response.status === 200) location.reload(); });
-	}
+	/*if ((Date.now() - UI.lastActivity) > 60 * 1000 * timeMapping[index]) {
+		fetch("/logout").then(response=> { if (response.status === 200) location.reload(); });
+	}*/
 
 	//update clock
 	const now = new Date();
