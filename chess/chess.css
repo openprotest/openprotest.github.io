@@ -93,7 +93,7 @@
 }
 
 .chess-cover > div {
-    background-color: var(--pane-color);
+    background-color: var(--clr-pane);
     border-radius: 8px;
     width: 90%;
     max-width: 400px;

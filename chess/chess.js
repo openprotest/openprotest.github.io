@@ -398,16 +398,16 @@ class Chess extends Window {
 
             } else {
                 const callback = ()=>{
-                    let aiMove = ChessAi(this.GetCurrentFen(), 1);
-                    if (!aiMove) throw ("ai panic");
-                    if (aiMove.length < 5) return;
-    
-                    let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
-                    let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
-                    
                     setTimeout(()=>{
+                        let aiMove = ChessAi(this.GetCurrentFen(), 1);
+                        if (!aiMove) throw ("ai panic");
+                        if (aiMove.length < 5) return;
+        
+                        let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
+                        let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
+                        
                         this.PlayMove(aiP0, aiP1, null);
-                    }, 500);
+                    });
                 };
                 this.PromoteDialog(p1, element, callback);
             }
@@ -438,14 +438,14 @@ class Chess extends Window {
             if (!(this.game.placement[p1.x][p1.y] === "P" && p1.y === 0) &&
                 !(this.game.placement[p1.x][p1.y] === "p" && p1.y === 7)) { //not a promote
                 
-                let aiMove = ChessAi(fen, 1);
-                if (!aiMove) throw ("ai panic");
-                if (aiMove.length < 5) return;
-
-                let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
-                let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
-
                 setTimeout(()=>{
+                    let aiMove = ChessAi(fen, 1);
+                    if (!aiMove) throw ("ai panic");
+                    if (aiMove.length < 5) return;
+
+                    let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
+                    let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
+
                     this.PlayMove(aiP0, aiP1, null);
                 }, 500);
             }

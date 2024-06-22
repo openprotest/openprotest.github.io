@@ -11,16 +11,34 @@ import (
 
 type Game struct {
 	placement [8][8]Piece
-	color     bool
+	color     PieceColor
 	castling  string
-	enpassant string
-	halfmove  string
-	fullmove  string
+	enPassant string
+	halfMove  string
+	fullMove  string
 }
 
+type PieceType byte
+
+const (
+	Pawn   = 0b00000001
+	Knight = 0b00000010
+	Bishop = 0b00000100
+	Rook   = 0b00001000
+	Queen  = 0b00010000
+	King   = 0b00100000
+)
+
+type PieceColor byte
+
+const (
+	Black = 0
+	White = 1
+)
+
 type Piece struct {
-	piece byte
-	color bool
+	piece PieceType
+	color PieceColor
 }
 
 type Position struct {
@@ -33,11 +51,11 @@ type Move struct {
 
 func loadFen(fen *string) (Game, error) {
 	var placement [8][8]Piece
-	var color bool
+	var color PieceColor
 	var castling string
-	var enpassant string
-	var halfmove string
-	var fullmove string
+	var enPassant string
+	var halfMove string
+	var fullMove string
 
 	var array []string = strings.Split(*fen, " ")
 
@@ -63,42 +81,42 @@ func loadFen(fen *string) (Game, error) {
 		}
 
 		switch target {
-		case "p": //black
-			placement[pos_x][pos_y] = Piece{piece: 0b00000001, color: false}
+		case "p":
+			placement[pos_x][pos_y] = Piece{piece: Pawn, color: Black}
 			break
 		case "n":
-			placement[pos_x][pos_y] = Piece{piece: 0b00000010, color: false}
+			placement[pos_x][pos_y] = Piece{piece: Knight, color: Black}
 			break
 		case "b":
-			placement[pos_x][pos_y] = Piece{piece: 0b00000100, color: false}
+			placement[pos_x][pos_y] = Piece{piece: Bishop, color: Black}
 			break
 		case "r":
-			placement[pos_x][pos_y] = Piece{piece: 0b00001000, color: false}
+			placement[pos_x][pos_y] = Piece{piece: Rook, color: Black}
 			break
 		case "q":
-			placement[pos_x][pos_y] = Piece{piece: 0b00010000, color: false}
+			placement[pos_x][pos_y] = Piece{piece: Queen, color: Black}
 			break
 		case "k":
-			placement[pos_x][pos_y] = Piece{piece: 0b00100000, color: false}
+			placement[pos_x][pos_y] = Piece{piece: King, color: Black}
 			break
 
-		case "P": //white
-			placement[pos_x][pos_y] = Piece{piece: 0b00000001, color: true}
+		case "P":
+			placement[pos_x][pos_y] = Piece{piece: Pawn, color: White}
 			break
 		case "N":
-			placement[pos_x][pos_y] = Piece{piece: 0b00000010, color: true}
+			placement[pos_x][pos_y] = Piece{piece: Knight, color: White}
 			break
 		case "B":
-			placement[pos_x][pos_y] = Piece{piece: 0b00000100, color: true}
+			placement[pos_x][pos_y] = Piece{piece: Bishop, color: White}
 			break
 		case "R":
-			placement[pos_x][pos_y] = Piece{piece: 0b00001000, color: true}
+			placement[pos_x][pos_y] = Piece{piece: Rook, color: White}
 			break
 		case "Q":
-			placement[pos_x][pos_y] = Piece{piece: 0b00010000, color: true}
+			placement[pos_x][pos_y] = Piece{piece: Queen, color: White}
 			break
 		case "K":
-			placement[pos_x][pos_y] = Piece{piece: 0b00100000, color: true}
+			placement[pos_x][pos_y] = Piece{piece: King, color: White}
 			break
 		}
 
@@ -106,17 +124,17 @@ func loadFen(fen *string) (Game, error) {
 	}
 
 	if array[1] == "w" {
-		color = true
+		color = White
 	} else {
-		color = false
+		color = Black
 	}
 
 	castling = array[2]
-	enpassant = array[3]
-	halfmove = array[4]
-	fullmove = array[5]
+	enPassant = array[3]
+	halfMove = array[4]
+	fullMove = array[5]
 
-	return Game{placement, color, castling, enpassant, halfmove, fullmove}, nil
+	return Game{placement, color, castling, enPassant, halfMove, fullMove}, nil
 }
 
 func moveToString(move Move) string {
@@ -133,6 +151,14 @@ func moveToString(move Move) string {
 	return builder.String()
 }
 
+func flipColor(color PieceColor) PieceColor {
+	if color == White {
+		return Black
+	} else {
+		return White
+	}
+}
+
 func printPosition(game *Game) {
 	for y := 0; y < 8; y++ {
 		print(8 - y)
@@ -145,32 +171,32 @@ func printPosition(game *Game) {
 				l = " "
 				break
 
-			case 0b00000001: //pawn
+			case Pawn:
 				l = "p"
 				break
 
-			case 0b00000010: //night
+			case Knight:
 				l = "n"
 				break
 
-			case 0b00000100: //bishop
+			case Bishop:
 				l = "b"
 				break
 
-			case 0b00001000: //rook
+			case Rook:
 				l = "r"
 				break
 
-			case 0b00010000: //queen
+			case Queen:
 				l = "q"
 				break
 
-			case 0b00100000: //king
+			case King:
 				l = "k"
 				break
 			}
 
-			if game.placement[x][y].color {
+			if game.placement[x][y].color == White {
 				print(strings.ToUpper(l))
 			} else {
 				print(l)
@@ -184,10 +210,10 @@ func printPosition(game *Game) {
 	println(" ")
 }
 
-func pawnMoves(game *Game, color bool, p *Position) []Move {
+func pawnMoves(game *Game, color PieceColor, p *Position) []Move {
 	var moves []Move
 
-	if game.placement[p.x][p.y].color { //white
+	if game.placement[p.x][p.y].color == White {
 
 		if game.placement[p.x][p.y-1].piece == 0 { //1 squares forward
 			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, p.y - 1}})
@@ -210,11 +236,11 @@ func pawnMoves(game *Game, color bool, p *Position) []Move {
 			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x + 1, p.y - 1}})
 		}
 
-		if game.enpassant != "-" { //enpassant
-			var enpassant_x int = int(byte(game.enpassant[0]) - 97)
-			var enpassant_y int = int(8 - byte(game.enpassant[1]))
-			if enpassant_y == p.y && math.Abs(float64(enpassant_x-p.x)) == 1 {
-				moves = append(moves, Move{Position{p.x, p.y}, Position{enpassant_x, enpassant_y - 1}})
+		if game.enPassant != "-" { //enPassant
+			var enPassant_x int = int(byte(game.enPassant[0]) - 97)
+			var enPassant_y int = int(8 - byte(game.enPassant[1]))
+			if enPassant_y == p.y && math.Abs(float64(enPassant_x-p.x)) == 1 {
+				moves = append(moves, Move{Position{p.x, p.y}, Position{enPassant_x, enPassant_y - 1}})
 			}
 		}
 
@@ -241,11 +267,11 @@ func pawnMoves(game *Game, color bool, p *Position) []Move {
 			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x + 1, p.y + 1}})
 		}
 
-		if game.enpassant != "-" { //enpassant
-			var enpassant_x int = int(byte(game.enpassant[0]) - 97)
-			var enpassant_y int = 8 - int(game.enpassant[1])
-			if enpassant_y == p.y && math.Abs(float64(enpassant_x-p.x)) == 1 {
-				moves = append(moves, Move{Position{p.x, p.y}, Position{enpassant_x, enpassant_y + 1}})
+		if game.enPassant != "-" { //enPassant
+			var enPassant_x int = int(byte(game.enPassant[0]) - 97)
+			var enPassant_y int = 8 - int(game.enPassant[1])
+			if enPassant_y == p.y && math.Abs(float64(enPassant_x-p.x)) == 1 {
+				moves = append(moves, Move{Position{p.x, p.y}, Position{enPassant_x, enPassant_y + 1}})
 			}
 		}
 	}
@@ -253,7 +279,7 @@ func pawnMoves(game *Game, color bool, p *Position) []Move {
 	return moves
 }
 
-func knightMoves(game *Game, color bool, p *Position) []Move {
+func knightMoves(game *Game, color PieceColor, p *Position) []Move {
 	var moves []Move
 
 	var offsets [8][2]int = [8][2]int{
@@ -285,7 +311,7 @@ func knightMoves(game *Game, color bool, p *Position) []Move {
 	return moves
 }
 
-func bishopMoves(game *Game, color bool, p *Position) []Move {
+func bishopMoves(game *Game, color PieceColor, p *Position) []Move {
 	var moves []Move
 
 	for i := 1; i < 8; i++ {
@@ -352,7 +378,7 @@ func bishopMoves(game *Game, color bool, p *Position) []Move {
 	return moves
 }
 
-func rockMoves(game *Game, color bool, p *Position) []Move {
+func rockMoves(game *Game, color PieceColor, p *Position) []Move {
 	var moves []Move
 
 	for i := int(p.x) - 1; i > -1; i-- {
@@ -398,7 +424,7 @@ func rockMoves(game *Game, color bool, p *Position) []Move {
 	return moves
 }
 
-func kingMoves(game *Game, color bool, p *Position) []Move {
+func kingMoves(game *Game, color PieceColor, p *Position) []Move {
 	var moves []Move
 
 	var offset [8][2]int = [8][2]int{
@@ -420,9 +446,9 @@ func kingMoves(game *Game, color bool, p *Position) []Move {
 		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
 	}
 
-	if color { //white king
+	if color == White {
 		if strings.Index(game.castling, "Q") > -1 &&
-			game.placement[0][7].piece == 0b00001000 && game.placement[0][7].color &&
+			game.placement[0][7].piece == Rook && game.placement[0][7].color == White &&
 			game.placement[1][7].piece == 0 &&
 			game.placement[2][7].piece == 0 &&
 			game.placement[3][7].piece == 0 { //white queen side castling
@@ -430,7 +456,7 @@ func kingMoves(game *Game, color bool, p *Position) []Move {
 		}
 
 		if strings.Index(game.castling, "K") > -1 &&
-			game.placement[7][7].piece == 0b00001000 && game.placement[7][7].color &&
+			game.placement[7][7].piece == Rook && game.placement[7][7].color == White &&
 			game.placement[5][7].piece == 0 &&
 			game.placement[6][7].piece == 0 { //white kingside castling
 			moves = append(moves, Move{Position{p.x, p.y}, Position{6, p.y}})
@@ -438,7 +464,7 @@ func kingMoves(game *Game, color bool, p *Position) []Move {
 
 	} else { //black king
 		if strings.Index(game.castling, "q") > -1 &&
-			game.placement[0][0].piece == 0b00001000 && !game.placement[0][7].color &&
+			game.placement[0][0].piece == Rook && game.placement[0][7].color == Black &&
 			game.placement[1][0].piece == 0 &&
 			game.placement[2][0].piece == 0 &&
 			game.placement[3][0].piece == 0 { //black queen side castling
@@ -446,7 +472,7 @@ func kingMoves(game *Game, color bool, p *Position) []Move {
 		}
 
 		if strings.Index(game.castling, "k") > -1 &&
-			game.placement[7][0].piece == 0b00001000 && !game.placement[7][7].color &&
+			game.placement[7][0].piece == Rook && game.placement[7][7].color == Black &&
 			game.placement[5][0].piece == 0 &&
 			game.placement[6][0].piece == 0 { //black kingside castling
 			moves = append(moves, Move{Position{p.x, p.y}, Position{6, p.y}})
@@ -456,21 +482,21 @@ func kingMoves(game *Game, color bool, p *Position) []Move {
 	return moves
 }
 
-func getPieces(game *Game, color bool) []Position {
+func getPieces(game *Game, color PieceColor) []Position {
 	var pieces []Position
 
-	if color { //white
+	if color == White {
 		for y := 0; y < 8; y++ {
 			for x := 0; x < 8; x++ {
-				if game.placement[x][y].color {
+				if game.placement[x][y].color == White {
 					pieces = append(pieces, Position{x: x, y: y})
 				}
 			}
 		}
-	} else { //black
+	} else {
 		for y := 0; y < 8; y++ {
 			for x := 0; x < 8; x++ {
-				if !game.placement[x][y].color {
+				if game.placement[x][y].color == Black {
 					pieces = append(pieces, Position{x: x, y: y})
 				}
 			}
@@ -480,7 +506,7 @@ func getPieces(game *Game, color bool) []Position {
 	return pieces
 }
 
-func pseudoLegalMoves(game *Game, color bool) []Move {
+func pseudoLegalMoves(game *Game, color PieceColor) []Move {
 	var pieces []Position = getPieces(game, color)
 
 	var moves []Move
@@ -489,30 +515,30 @@ func pseudoLegalMoves(game *Game, color bool) []Move {
 		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
 
 		switch piece.piece {
-		case 0b00000001: //p
+		case Pawn:
 			var tmp []Move = pawnMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00000010: //n
+		case Knight:
 			var tmp []Move = knightMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00000100: //b
+		case Bishop:
 			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00001000: //r
+		case Rook:
 			var tmp []Move = rockMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00010000: //q
+		case Queen:
 			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
 			tmp = rockMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00100000: //k
+		case King:
 			var tmp []Move = kingMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 		}
@@ -521,7 +547,7 @@ func pseudoLegalMoves(game *Game, color bool) []Move {
 	return moves
 }
 
-func legalMoves(game *Game, color bool) []Move {
+func legalMoves(game *Game, color PieceColor) []Move {
 	//var enemyControl [8][8]bool = getEnemyControl(game)
 	var pseudoLegal []Move = pseudoLegalMoves(game, color)
 	var moves []Move
@@ -533,29 +559,28 @@ func legalMoves(game *Game, color bool) []Move {
 		}
 	}
 
-	//TODO:
 	return moves
 }
 
 func getEnemyControl(game *Game) [8][8]bool {
 	var area [8][8]bool
 
-	var pieces []Position = getPieces(game, !game.color)
+	var pieces []Position = getPieces(game, flipColor(game.color))
 	var moves []Move
 
 	for i := 0; i < len(pieces); i++ {
 		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
 
 		switch piece.piece {
-		case 0b00000001: //p
-			if piece.color { //white
+		case Pawn:
+			if piece.color == White {
 				if pieces[i].x > 0 {
 					area[pieces[i].x-1][pieces[i].y-1] = true
 				}
 				if pieces[i].x < 7 {
 					area[pieces[i].x+1][pieces[i].y-1] = true
 				}
-			} else { //black
+			} else {
 				if pieces[i].x > 0 {
 					area[pieces[i].x-1][pieces[i].y+1] = true
 				}
@@ -564,26 +589,26 @@ func getEnemyControl(game *Game) [8][8]bool {
 				}
 			}
 
-		case 0b00000010: //n
+		case Knight:
 			var tmp []Move = knightMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00000100: //b
+		case Bishop:
 			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00001000: //r
+		case Rook:
 			var tmp []Move = rockMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00010000: //q
+		case Queen:
 			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
 			tmp = rockMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 
-		case 0b00100000: //k
+		case King:
 			var tmp []Move = kingMoves(game, piece.color, &pieces[i])
 			moves = append(moves, tmp...)
 		}
@@ -601,28 +626,28 @@ func makeMove(game Game, move Move) Game {
 	//TODO: castling
 	//TODO: ...
 
-	if game.placement[move.p0.x][move.p0.y].piece == 0b00000001 && math.Abs(float64(move.p0.y-move.p1.y)) == 2 { //en passant flag
-		game.enpassant = string([]byte{97 + byte(move.p1.x), 8 - byte(move.p1.y)})
+	if game.placement[move.p0.x][move.p0.y].piece == Pawn && math.Abs(float64(move.p0.y-move.p1.y)) == 2 { //en passant flag
+		game.enPassant = string([]byte{97 + byte(move.p1.x), 8 - byte(move.p1.y)})
 	} else {
-		game.enpassant = "-"
+		game.enPassant = "-"
 	}
 
-	if game.placement[move.p0.x][move.p0.y].piece == 0b00000001 && move.p0.x != move.p1.x && game.placement[move.p1.x][move.p1.y].piece == 0 { //en passant
-		game.placement[move.p1.x][move.p0.y] = Piece{0, false}
+	if game.placement[move.p0.x][move.p0.y].piece == Pawn && move.p0.x != move.p1.x && game.placement[move.p1.x][move.p1.y].piece == 0 { //en passant
+		game.placement[move.p1.x][move.p0.y] = Piece{0, Black}
 	}
 
 	//castling flags
-	if game.placement[move.p0.x][move.p0.y].piece == 0b00100000 { //king
-		if game.placement[move.p0.x][move.p0.y].color { //white king
+	if game.placement[move.p0.x][move.p0.y].piece == King {
+		if game.placement[move.p0.x][move.p0.y].color == White {
 			game.castling = strings.Replace(game.castling, "K", "", 1)
 			game.castling = strings.Replace(game.castling, "R", "", 1)
-		} else { //black king
+		} else {
 			game.castling = strings.Replace(game.castling, "k", "", 1)
 			game.castling = strings.Replace(game.castling, "r", "", 1)
 		}
 	}
-	if game.placement[move.p0.x][move.p0.y].piece == 0b00001000 { //rock
-		if game.placement[move.p0.x][move.p0.y].color { //white rock
+	if game.placement[move.p0.x][move.p0.y].piece == Rook {
+		if game.placement[move.p0.x][move.p0.y].color == White { //white rock
 			if move.p0.x == 0 && move.p0.y == 7 { //queen side
 				game.castling = strings.Replace(game.castling, "Q", "", 1)
 			}
@@ -643,64 +668,64 @@ func makeMove(game Game, move Move) Game {
 	}
 
 	//castling
-	if game.placement[move.p0.x][move.p0.y].piece == 0b00100000 {
-		if game.placement[move.p0.x][move.p0.y].color { //white king
+	if game.placement[move.p0.x][move.p0.y].piece == King {
+		if game.placement[move.p0.x][move.p0.y].color == White {
 			if int(move.p0.x)-int(move.p1.x) == 2 { //queen side
-				game.placement[3][7] = Piece{0b00001000, true}
-				game.placement[0][7] = Piece{0, false}
+				game.placement[3][7] = Piece{Rook, White}
+				game.placement[0][7] = Piece{0, White}
 			} else if int(move.p0.x)-int(move.p1.x) == -2 { //king side
-				game.placement[5][7] = Piece{0b00001000, true}
-				game.placement[7][7] = Piece{0, false}
+				game.placement[5][7] = Piece{Rook, White}
+				game.placement[7][7] = Piece{0, White}
 			}
 
 		} else { //black king
 			if int(move.p0.x)-int(move.p1.x) == 2 { //queen side
-				game.placement[3][0] = Piece{0b00001000, false}
-				game.placement[0][0] = Piece{0, false}
+				game.placement[3][0] = Piece{Rook, Black}
+				game.placement[0][0] = Piece{0, Black}
 			} else if int(move.p0.x)-int(move.p1.x) == -2 { //king side
-				game.placement[5][0] = Piece{0b00001000, false}
-				game.placement[7][0] = Piece{0, false}
+				game.placement[5][0] = Piece{Rook, Black}
+				game.placement[7][0] = Piece{0, Black}
 			}
 		}
 	}
 
 	//move
 	game.placement[move.p1.x][move.p1.y] = game.placement[move.p0.x][move.p0.y]
-	game.placement[move.p0.x][move.p0.y] = Piece{0, false}
+	game.placement[move.p0.x][move.p0.y] = Piece{0, Black}
 
 	//promote
-	if game.placement[move.p1.x][move.p1.y].piece == 0b00000001 {
-		if game.placement[move.p1.x][move.p1.y].color && move.p1.y == 0 { //white pawn
-			game.placement[move.p1.x][move.p1.y] = Piece{0b00010000, true}
+	if game.placement[move.p1.x][move.p1.y].piece == Pawn {
+		if game.placement[move.p1.x][move.p1.y].color == White && move.p1.y == 0 { //white pawn
+			game.placement[move.p1.x][move.p1.y] = Piece{Queen, Black}
 
-		} else if !game.placement[move.p1.x][move.p1.y].color && move.p1.y == 7 { //black pawn
-			game.placement[move.p1.x][move.p1.y] = Piece{0b00010000, false}
+		} else if game.placement[move.p1.x][move.p1.y].color == Black && move.p1.y == 7 { //black pawn
+			game.placement[move.p1.x][move.p1.y] = Piece{Queen, Black}
 		}
 	}
 
-	game.color = !game.color
+	game.color = flipColor(game.color)
 
 	return game
 }
 
-func inCheck(game Game, color bool) bool {
+func inCheck(game Game, color PieceColor) bool {
 	var kingsPosition Position
 	for y := 0; y < 8; y++ { //find king
 		for x := 0; x < 8; x++ {
-			if game.placement[x][y].piece == 0b00100000 && game.placement[x][y].color == color {
+			if game.placement[x][y].piece == King && game.placement[x][y].color == color {
 				kingsPosition = Position{x, y}
 				break
 			}
 		}
 	}
 
-	var pieces []Position = getPieces(&game, !color)
+	var pieces []Position = getPieces(&game, flipColor(color))
 
 	for i := 0; i < len(pieces); i++ {
 		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
 
 		switch piece.piece {
-		case 0b00000001: //p
+		case Pawn:
 			var moves []Move = pawnMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -708,7 +733,7 @@ func inCheck(game Game, color bool) bool {
 				}
 			}
 
-		case 0b00000010: //n
+		case Knight:
 			var moves []Move = knightMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -716,7 +741,7 @@ func inCheck(game Game, color bool) bool {
 				}
 			}
 
-		case 0b00000100: //b
+		case Bishop:
 			var moves []Move = bishopMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -724,7 +749,7 @@ func inCheck(game Game, color bool) bool {
 				}
 			}
 
-		case 0b00001000: //r
+		case Rook:
 			var moves []Move = rockMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -732,7 +757,7 @@ func inCheck(game Game, color bool) bool {
 				}
 			}
 
-		case 0b00010000: //q
+		case Queen:
 			var moves []Move = bishopMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -747,7 +772,7 @@ func inCheck(game Game, color bool) bool {
 				}
 			}
 
-		case 0b00100000: //k
+		case King:
 			var moves []Move = kingMoves(&game, piece.color, &pieces[i])
 			for i := 0; i < len(moves); i++ {
 				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
@@ -761,30 +786,30 @@ func inCheck(game Game, color bool) bool {
 }
 
 func evaluate(game *Game) int {
-	var whitePieces []Position = getPieces(game, true)
-	var blackPieces []Position = getPieces(game, false)
+	var whitePieces []Position = getPieces(game, White)
+	var blackPieces []Position = getPieces(game, Black)
 
 	var score int = 0
 
 	for i := 0; i < len(whitePieces); i++ {
 		switch game.placement[whitePieces[i].x][whitePieces[i].y].piece {
-		case 0b00000001: //pawn
+		case Pawn:
 			score += 100
 			break
 
-		case 0b00000010: //night
+		case Knight:
 			score += 300
 			break
 
-		case 0b00000100: //bishop
+		case Bishop:
 			score += 301
 			break
 
-		case 0b00001000: //rook
+		case Rook:
 			score += 500
 			break
 
-		case 0b00010000: //queen
+		case Queen:
 			score += 900
 			break
 		}
@@ -792,85 +817,157 @@ func evaluate(game *Game) int {
 
 	for i := 0; i < len(blackPieces); i++ {
 		switch game.placement[blackPieces[i].x][blackPieces[i].y].piece {
-		case 0b00000001: //pawn
+		case Pawn:
 			score -= 100
 
-		case 0b00000010: //night
+		case Knight:
 			score -= 300
 			break
 
-		case 0b00000100: //bishop
+		case Bishop:
 			score -= 301
 			break
 
-		case 0b00001000: //rook
+		case Rook:
 			score -= 500
 			break
 
-		case 0b00010000: //queen
+		case Queen:
 			score -= 900
 			break
 		}
 	}
 
 	var perspective int
-	if game.color {
+	if game.color == White {
 		perspective = 1
 	} else {
 		perspective = -1
 	}
 
-	//TODO:
+	//TODO: more complex evaluation
 
 	return score * perspective
 }
 
-func calculate(game *Game, lastMove Move, depth int) (Move, int) {
+func oldcalculate(game *Game, lastMove Move, depth int) (Move, int) {
 	var bestMove Move = Move{}
 	var bestScore int = 0
 
-	if depth == 0 {
-		return bestMove, bestScore
-	}
-
-	var moves []Move = legalMoves(game, game.color)
-
-	if len(moves) == 0 {
-		if inCheck(*game, game.color) { //checkmate
-			return lastMove, math.MinInt32
-
-		} else { //stalemate
-			return lastMove, 0
+	/*
+		if depth < 1 {
+			return bestMove, bestScore
 		}
-	}
 
-	for i := 0; i < len(moves); i++ {
-		var next Game = makeMove(*game, moves[i])
-		var score int = evaluate(&next)
+		var moves []Move = legalMoves(game, game.color)
 
-		if score > bestScore {
-			bestMove = moves[i]
-			bestScore = score
+		if len(moves) == 0 {
+			if inCheck(*game, game.color) { //checkmate
+				return lastMove, math.MinInt32
+			} else { //stalemate
+				return lastMove, 0
+			}
 		}
+
+		for i := 0; i < len(moves); i++ {
+			var next Game = makeMove(*game, moves[i])
+			var score int = evaluate(&next)
+
+			if score > bestScore {
+				bestMove = moves[i]
+				bestScore = score
+			}
+
+			if score != 0 {
+				//printPosition(&next)
+				print("d:")
+				print(depth)
+				print(" m:")
+				print(moves[i].p1.x)
+				print(",")
+				print(moves[i].p1.y)
+				print(" e:")
+				print(score)
+				println(" ")
+				//println("- - - - - - - -")
+				//println(" ")
+			}
+
+			calculate(&next, moves[i], depth-1)
+		}
+	*/
+
+	return bestMove, bestScore
+}
+
+func calculate(game *Game, depth int) (Move, int) {
+	moves := legalMoves(game, game.color)
+	bestMove := moves[0]
+	bestScore := math.MinInt32
+
+	for _, move := range moves {
+		clone := makeMove(*game, move)
+		score := alphaBetaPruning(&clone, depth-1, math.MinInt32, math.MaxInt32, false)
 
 		if score != 0 {
-			printPosition(&next)
+			//printPosition(&next)
 			print("d:")
 			print(depth)
 			print(" m:")
-			print(moves[i].p1.x)
-			print(moves[i].p1.y)
+			print(move.p1.x)
+			print(",")
+			print(move.p1.y)
 			print(" e:")
 			print(score)
-			println()
-			println("- - - - - - - -")
-			println()
+			println(" ")
+			//println("- - - - - - - -")
+			//println(" ")
 		}
 
-		calculate(&next, moves[i], depth-1)
+		if score > bestScore {
+			bestScore = score
+			bestMove = move
+		}
 	}
 
 	return bestMove, bestScore
+}
+
+func alphaBetaPruning(game *Game, depth int, alpha, beta int, maximizingPlayer bool) int {
+	if depth == 0 {
+		return evaluate(game)
+	}
+
+	moves := legalMoves(game, game.color)
+	if !maximizingPlayer {
+		moves = legalMoves(game, flipColor(game.color))
+	}
+
+	if maximizingPlayer {
+		maxScore := math.MinInt32
+		for _, move := range moves {
+			clone := makeMove(*game, move)
+			score := alphaBetaPruning(&clone, depth-1, alpha, beta, false)
+			maxScore = max(maxScore, score)
+			alpha = max(alpha, score)
+			if beta <= alpha {
+				break
+			}
+		}
+		return maxScore
+	} else {
+		minScore := math.MaxInt32
+		for _, move := range moves {
+			clone := makeMove(*game, move)
+			score := alphaBetaPruning(&clone, depth-1, alpha, beta, true)
+			minScore = min(minScore, score)
+			beta = min(beta, score)
+			if beta <= alpha {
+				break
+			}
+		}
+		return minScore
+	}
 }
 
 func randomMove(game *Game) Move {

@@ -22,7 +22,9 @@ func calc(this js.Value, i []js.Value) interface{} {
 
 	//printPosition(&game)
 
-	var move Move = randomMove(&game)
+	//var move Move = randomMove(&game)
+	var move, _ = calculate(&game, 3)
+
 	return moveToString(move)
 }
 

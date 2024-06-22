@@ -4,8 +4,8 @@
 
 "use strict";
 
-(() => {
-	const enosys = () => {
+(()=> {
+	const enosys = ()=> {
 		const err = new Error("not implemented");
 		err.code = "ENOSYS";
 		return err;
@@ -14,13 +14,13 @@
 	if (!globalThis.fs) {
 		let outputBuf = "";
 		globalThis.fs = {
-			constants: { O_WRONLY: -1, O_RDWR: -1, O_CREAT: -1, O_TRUNC: -1, O_APPEND: -1, O_EXCL: -1 }, // unused
+			constants: { O_WRONLY:-1, O_RDWR:-1, O_CREAT:-1, O_TRUNC:-1, O_APPEND:-1, O_EXCL:-1 }, // unused
 			writeSync(fd, buf) {
 				outputBuf += decoder.decode(buf);
 				const nl = outputBuf.lastIndexOf("\n");
 				if (nl != -1) {
-					console.log(outputBuf.substr(0, nl));
-					outputBuf = outputBuf.substr(nl + 1);
+					console.log(outputBuf.substring(0, nl));
+					outputBuf = outputBuf.substring(nl + 1);
 				}
 				return buf.length;
 			},
@@ -96,30 +96,34 @@
 		constructor() {
 			this.argv = ["js"];
 			this.env = {};
-			this.exit = (code) => {
+			this.exit = code=> {
 				if (code !== 0) {
 					console.warn("exit code:", code);
 				}
 			};
-			this._exitPromise = new Promise((resolve) => {
+			this._exitPromise = new Promise(resolve=> {
 				this._resolveExitPromise = resolve;
 			});
 			this._pendingEvent = null;
 			this._scheduledTimeouts = new Map();
 			this._nextCallbackTimeoutID = 1;
 
-			const setInt64 = (addr, v) => {
+			const setInt64 = (addr, v)=> {
 				this.mem.setUint32(addr + 0, v, true);
 				this.mem.setUint32(addr + 4, Math.floor(v / 4294967296), true);
 			}
 
-			const getInt64 = (addr) => {
+			const setInt32 = (addr, v)=> {
+				this.mem.setUint32(addr + 0, v, true);
+			}
+
+			const getInt64 = addr=> {
 				const low = this.mem.getUint32(addr + 0, true);
 				const high = this.mem.getInt32(addr + 4, true);
 				return low + high * 4294967296;
 			}
 
-			const loadValue = (addr) => {
+			const loadValue = addr=> {
 				const f = this.mem.getFloat64(addr, true);
 				if (f === 0) {
 					return undefined;
@@ -132,7 +136,7 @@
 				return this._values[id];
 			}
 
-			const storeValue = (addr, v) => {
+			const storeValue = (addr, v)=> {
 				const nanHead = 0x7FF80000;
 
 				if (typeof v === "number" && v !== 0) {
@@ -182,13 +186,13 @@
 				this.mem.setUint32(addr, id, true);
 			}
 
-			const loadSlice = (addr) => {
+			const loadSlice = addr=> {
 				const array = getInt64(addr + 0);
 				const len = getInt64(addr + 8);
 				return new Uint8Array(this._inst.exports.mem.buffer, array, len);
 			}
 
-			const loadSliceOfValues = (addr) => {
+			const loadSliceOfValues = addr=> {
 				const array = getInt64(addr + 0);
 				const len = getInt64(addr + 8);
 				const a = new Array(len);
@@ -198,7 +202,7 @@
 				return a;
 			}
 
-			const loadString = (addr) => {
+			const loadString = addr=> {
 				const saddr = getInt64(addr + 0);
 				const len = getInt64(addr + 8);
 				return decoder.decode(new DataView(this._inst.exports.mem.buffer, saddr, len));
@@ -206,14 +210,17 @@
 
 			const timeOrigin = Date.now() - performance.now();
 			this.importObject = {
-				go: {
+				_gotest: {
+					add: (a, b)=> a + b,
+				},
+				gojs: {
 					// Go's SP does not change as long as no Go code is running. Some operations (e.g. calls, getters and setters)
 					// may synchronously trigger a Go event handler. This makes Go code get executed in the middle of the imported
 					// function. A goroutine can switch to a new stack if the current stack is too small (see morestack function).
 					// This changes the SP, thus we have to update the SP used by the imported function.
 
 					// func wasmExit(code int32)
-					"runtime.wasmExit": (sp) => {
+					"runtime.wasmExit": sp=> {
 						sp >>>= 0;
 						const code = this.mem.getInt32(sp + 8, true);
 						this.exited = true;
@@ -226,7 +233,7 @@
 					},
 
 					// func wasmWrite(fd uintptr, p unsafe.Pointer, n int32)
-					"runtime.wasmWrite": (sp) => {
+					"runtime.wasmWrite": sp=> {
 						sp >>>= 0;
 						const fd = getInt64(sp + 8);
 						const p = getInt64(sp + 16);
@@ -235,19 +242,19 @@
 					},
 
 					// func resetMemoryDataView()
-					"runtime.resetMemoryDataView": (sp) => {
+					"runtime.resetMemoryDataView": sp=> {
 						sp >>>= 0;
 						this.mem = new DataView(this._inst.exports.mem.buffer);
 					},
 
 					// func nanotime1() int64
-					"runtime.nanotime1": (sp) => {
+					"runtime.nanotime1": sp=> {
 						sp >>>= 0;
 						setInt64(sp + 8, (timeOrigin + performance.now()) * 1000000);
 					},
 
 					// func walltime() (sec int64, nsec int32)
-					"runtime.walltime": (sp) => {
+					"runtime.walltime": sp=> {
 						sp >>>= 0;
 						const msec = (new Date).getTime();
 						setInt64(sp + 8, msec / 1000);
@@ -255,12 +262,12 @@
 					},
 
 					// func scheduleTimeoutEvent(delay int64) int32
-					"runtime.scheduleTimeoutEvent": (sp) => {
+					"runtime.scheduleTimeoutEvent": sp=> {
 						sp >>>= 0;
 						const id = this._nextCallbackTimeoutID;
 						this._nextCallbackTimeoutID++;
 						this._scheduledTimeouts.set(id, setTimeout(
-							() => {
+							()=> {
 								this._resume();
 								while (this._scheduledTimeouts.has(id)) {
 									// for some reason Go failed to register the timeout event, log and try again
@@ -269,13 +276,13 @@
 									this._resume();
 								}
 							},
-							getInt64(sp + 8) + 1, // setTimeout has been seen to fire up to 1 millisecond early
+							getInt64(sp+8),
 						));
 						this.mem.setInt32(sp + 16, id, true);
 					},
 
 					// func clearTimeoutEvent(id int32)
-					"runtime.clearTimeoutEvent": (sp) => {
+					"runtime.clearTimeoutEvent": sp=> {
 						sp >>>= 0;
 						const id = this.mem.getInt32(sp + 8, true);
 						clearTimeout(this._scheduledTimeouts.get(id));
@@ -283,13 +290,13 @@
 					},
 
 					// func getRandomData(r []byte)
-					"runtime.getRandomData": (sp) => {
+					"runtime.getRandomData": sp=> {
 						sp >>>= 0;
 						crypto.getRandomValues(loadSlice(sp + 8));
 					},
 
 					// func finalizeRef(v ref)
-					"syscall/js.finalizeRef": (sp) => {
+					"syscall/js.finalizeRef": sp=> {
 						sp >>>= 0;
 						const id = this.mem.getUint32(sp + 8, true);
 						this._goRefCounts[id]--;
@@ -302,13 +309,13 @@
 					},
 
 					// func stringVal(value string) ref
-					"syscall/js.stringVal": (sp) => {
+					"syscall/js.stringVal": sp=> {
 						sp >>>= 0;
 						storeValue(sp + 24, loadString(sp + 8));
 					},
 
 					// func valueGet(v ref, p string) ref
-					"syscall/js.valueGet": (sp) => {
+					"syscall/js.valueGet": sp=> {
 						sp >>>= 0;
 						const result = Reflect.get(loadValue(sp + 8), loadString(sp + 16));
 						sp = this._inst.exports.getsp() >>> 0; // see comment above
@@ -316,31 +323,31 @@
 					},
 
 					// func valueSet(v ref, p string, x ref)
-					"syscall/js.valueSet": (sp) => {
+					"syscall/js.valueSet": sp=> {
 						sp >>>= 0;
 						Reflect.set(loadValue(sp + 8), loadString(sp + 16), loadValue(sp + 32));
 					},
 
 					// func valueDelete(v ref, p string)
-					"syscall/js.valueDelete": (sp) => {
+					"syscall/js.valueDelete": sp=> {
 						sp >>>= 0;
 						Reflect.deleteProperty(loadValue(sp + 8), loadString(sp + 16));
 					},
 
 					// func valueIndex(v ref, i int) ref
-					"syscall/js.valueIndex": (sp) => {
+					"syscall/js.valueIndex": sp=> {
 						sp >>>= 0;
 						storeValue(sp + 24, Reflect.get(loadValue(sp + 8), getInt64(sp + 16)));
 					},
 
 					// valueSetIndex(v ref, i int, x ref)
-					"syscall/js.valueSetIndex": (sp) => {
+					"syscall/js.valueSetIndex": sp=> {
 						sp >>>= 0;
 						Reflect.set(loadValue(sp + 8), getInt64(sp + 16), loadValue(sp + 24));
 					},
 
 					// func valueCall(v ref, m string, args []ref) (ref, bool)
-					"syscall/js.valueCall": (sp) => {
+					"syscall/js.valueCall": sp=> {
 						sp >>>= 0;
 						try {
 							const v = loadValue(sp + 8);
@@ -358,7 +365,7 @@
 					},
 
 					// func valueInvoke(v ref, args []ref) (ref, bool)
-					"syscall/js.valueInvoke": (sp) => {
+					"syscall/js.valueInvoke": sp=> {
 						sp >>>= 0;
 						try {
 							const v = loadValue(sp + 8);
@@ -375,7 +382,7 @@
 					},
 
 					// func valueNew(v ref, args []ref) (ref, bool)
-					"syscall/js.valueNew": (sp) => {
+					"syscall/js.valueNew": sp=> {
 						sp >>>= 0;
 						try {
 							const v = loadValue(sp + 8);
@@ -392,13 +399,13 @@
 					},
 
 					// func valueLength(v ref) int
-					"syscall/js.valueLength": (sp) => {
+					"syscall/js.valueLength": sp=> {
 						sp >>>= 0;
 						setInt64(sp + 16, parseInt(loadValue(sp + 8).length));
 					},
 
 					// valuePrepareString(v ref) (ref, int)
-					"syscall/js.valuePrepareString": (sp) => {
+					"syscall/js.valuePrepareString": sp=> {
 						sp >>>= 0;
 						const str = encoder.encode(String(loadValue(sp + 8)));
 						storeValue(sp + 16, str);
@@ -406,20 +413,20 @@
 					},
 
 					// valueLoadString(v ref, b []byte)
-					"syscall/js.valueLoadString": (sp) => {
+					"syscall/js.valueLoadString": sp=> {
 						sp >>>= 0;
 						const str = loadValue(sp + 8);
 						loadSlice(sp + 16).set(str);
 					},
 
 					// func valueInstanceOf(v ref, t ref) bool
-					"syscall/js.valueInstanceOf": (sp) => {
+					"syscall/js.valueInstanceOf": sp=> {
 						sp >>>= 0;
 						this.mem.setUint8(sp + 24, (loadValue(sp + 8) instanceof loadValue(sp + 16)) ? 1 : 0);
 					},
 
 					// func copyBytesToGo(dst []byte, src ref) (int, bool)
-					"syscall/js.copyBytesToGo": (sp) => {
+					"syscall/js.copyBytesToGo": sp=> {
 						sp >>>= 0;
 						const dst = loadSlice(sp + 8);
 						const src = loadValue(sp + 32);
@@ -434,7 +441,7 @@
 					},
 
 					// func copyBytesToJS(dst ref, src []byte) (int, bool)
-					"syscall/js.copyBytesToJS": (sp) => {
+					"syscall/js.copyBytesToJS": sp=> {
 						sp >>>= 0;
 						const dst = loadValue(sp + 8);
 						const src = loadSlice(sp + 16);
@@ -448,7 +455,7 @@
 						this.mem.setUint8(sp + 48, 1);
 					},
 
-					"debug": (value) => {
+					"debug": value=> {
 						console.log(value);
 					},
 				}
@@ -485,7 +492,7 @@
 			// Pass command line arguments and environment variables to WebAssembly by writing them to the linear memory.
 			let offset = 4096;
 
-			const strPtr = (str) => {
+			const strPtr = str=> {
 				const ptr = offset;
 				const bytes = encoder.encode(str + "\0");
 				new Uint8Array(this.mem.buffer, offset, bytes.length).set(bytes);
@@ -499,19 +506,19 @@
 			const argc = this.argv.length;
 
 			const argvPtrs = [];
-			this.argv.forEach((arg) => {
+			this.argv.forEach(arg=> {
 				argvPtrs.push(strPtr(arg));
 			});
 			argvPtrs.push(0);
 
 			const keys = Object.keys(this.env).sort();
-			keys.forEach((key) => {
+			keys.forEach(key=> {
 				argvPtrs.push(strPtr(`${key}=${this.env[key]}`));
 			});
 			argvPtrs.push(0);
 
 			const argv = offset;
-			argvPtrs.forEach((ptr) => {
+			argvPtrs.forEach(ptr=> {
 				this.mem.setUint32(offset, ptr, true);
 				this.mem.setUint32(offset + 4, 0, true);
 				offset += 8;
