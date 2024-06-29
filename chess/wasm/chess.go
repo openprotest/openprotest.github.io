@@ -847,57 +847,7 @@ func evaluate(game *Game) int {
 
 	//TODO: more complex evaluation
 
-	return score * perspective
-}
-
-func oldcalculate(game *Game, lastMove Move, depth int) (Move, int) {
-	var bestMove Move = Move{}
-	var bestScore int = 0
-
-	/*
-		if depth < 1 {
-			return bestMove, bestScore
-		}
-
-		var moves []Move = legalMoves(game, game.color)
-
-		if len(moves) == 0 {
-			if inCheck(*game, game.color) { //checkmate
-				return lastMove, math.MinInt32
-			} else { //stalemate
-				return lastMove, 0
-			}
-		}
-
-		for i := 0; i < len(moves); i++ {
-			var next Game = makeMove(*game, moves[i])
-			var score int = evaluate(&next)
-
-			if score > bestScore {
-				bestMove = moves[i]
-				bestScore = score
-			}
-
-			if score != 0 {
-				//printPosition(&next)
-				print("d:")
-				print(depth)
-				print(" m:")
-				print(moves[i].p1.x)
-				print(",")
-				print(moves[i].p1.y)
-				print(" e:")
-				print(score)
-				println(" ")
-				//println("- - - - - - - -")
-				//println(" ")
-			}
-
-			calculate(&next, moves[i], depth-1)
-		}
-	*/
-
-	return bestMove, bestScore
+	return score * -perspective
 }
 
 func calculate(game *Game, depth int) (Move, int) {
