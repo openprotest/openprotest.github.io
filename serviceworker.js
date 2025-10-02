@@ -17,6 +17,7 @@ self.addEventListener("install", event => {
 				"/tip.css",
 				"/tools.css",
 				"/window.css",
+				"/terminal.css",
 
 				"/ui.js",
 				"/window.js",
@@ -36,6 +37,8 @@ self.addEventListener("install", event => {
 				"/personalize.js",
 				"/screencapture.js",
 				"/locateip.js",
+				"/terminal.js",
+				"/serial.js",
 				"/chess/chess.js",
 
 				"/fonts/opensans300.ttf",
@@ -145,7 +148,6 @@ self.addEventListener("install", event => {
 
 				"/data/words.txt",
 				"/data/mac.bin",
-				"/data/ip/0.bin",
 				"/data/ip/1.bin",
 				"/data/ip/2.bin",
 				"/data/ip/3.bin",
@@ -354,23 +356,7 @@ self.addEventListener("install", event => {
 				"/data/ip/236.bin",
 				"/data/ip/237.bin",
 				"/data/ip/238.bin",
-				"/data/ip/239.bin",
-				"/data/ip/240.bin",
-				"/data/ip/241.bin",
-				"/data/ip/242.bin",
-				"/data/ip/243.bin",
-				"/data/ip/244.bin",
-				"/data/ip/245.bin",
-				"/data/ip/246.bin",
-				"/data/ip/247.bin",
-				"/data/ip/248.bin",
-				"/data/ip/249.bin",
-				"/data/ip/250.bin",
-				"/data/ip/251.bin",
-				"/data/ip/252.bin",
-				"/data/ip/253.bin",
-				"/data/ip/254.bin",
-				"/data/ip/255.bin"
+				"/data/ip/239.bin"
 			]);
 		})
 	);

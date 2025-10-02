@@ -1,0 +1,67 @@
+.terminal-content {
+	font-family: consolas, monospace;
+	margin: 20px;
+	overflow-y: scroll;
+	-webkit-user-select: text; user-select: text;
+}
+
+.terminal-content > span {
+	position: absolute;
+	width: 8px;
+	height: 18px;
+}
+
+.terminal-status-box {
+	display: none;
+	position: sticky;
+	top: 20px;
+	left: calc(50% - 110px);
+	width: 200px;
+	padding: 20px 20px 20px 64px;
+	text-align: center;
+	z-index: 1;
+	border-radius: 4px;
+	box-shadow: var(--clr-dark) 0 0 4px;
+	font-family: var(--global-font-family);
+	font-weight: 800;
+	white-space: nowrap;
+	color: var(--clr-dark);
+	background-color: var(--clr-pane);
+	background-image: url(mono/connect.svg);
+	background-size: 48px 48px;
+	background-position: 8px 50%;
+	background-repeat: no-repeat;
+	-webkit-user-select: none; user-select: none;
+	pointer-events: none;
+}
+
+.terminal-cursor {
+	position: absolute;
+	z-index: 1;
+	width: 3px;
+	height: 20px;
+	border-radius: 1px;
+	background-color: var(--clr-accent);
+	box-shadow: var(--clr-accent) 0 0 4px;
+	display: none;
+
+	transition-timing-function: ease-out;
+	animation: terminal-blinking 1.2s infinite;
+}
+
+.terminal-content:focus > .terminal-cursor {
+	display: initial;
+}
+
+@keyframes terminal-blinking {
+	20%{opacity:1}
+	50%{opacity:.1}
+	80%{opacity:1}
+}
+
+@keyframes terminal-shake {
+	15%, 85% {opacity:1; transform:rotate(-5deg)}
+	30%, 70% {opacity:1; transform:rotate(10deg)}
+	40%, 60% {opacity:1; transform:rotate(-18deg)}
+	50% {opacity:1; transform:rotate(18deg)}
+}

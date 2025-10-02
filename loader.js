@@ -19,6 +19,7 @@ const LOADER = {
 		"tabs.js",
 		"console.js",
 		"ipbox.js",
+		"terminal.js",
 		"wasm_exec.js"
 	],
 	
@@ -34,6 +35,7 @@ const LOADER = {
 		"mictester.js",
 		"cameratester.js",
 		"screencapture.js",
+		"serial.js",
 		"chess/chess.js"
 	],
 
@@ -163,6 +165,7 @@ const LOADER = {
 		case "MicTester"      : return new MicTester(command.params);
 		case "CameraTester"   : return new CameraTester(command.params);
 		case "ScreenCapture"  : return new ScreenCapture(command.params);
+		case "SerialRS232"         : return new SerialRS232(command.params);
 		case "Chess"          : return new Chess();
 		case "About"          : return new About(command.params);
 		case "Personalize"    : return new Personalize(command.params);
