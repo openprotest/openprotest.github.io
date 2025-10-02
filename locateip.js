@@ -117,12 +117,12 @@ class LocateIp extends Console {
 		let name = document.createElement("div");
 		name.className = "tool-label";
 		name.style.paddingLeft = "24px";
-		name.innerHTML = ipaddr;
+		name.textContent = ipaddr;
 		element.appendChild(name);
 
 		let result = document.createElement("div");
 		result.className = "tool-result collapsed100";
-		result.innerHTML = "";
+		result.textContent = "";
 		element.appendChild(result);
 
 		let remove = document.createElement("div");
@@ -140,13 +140,13 @@ class LocateIp extends Console {
 
 		let ipBytes = ipaddr.split(".");
 		if (ipBytes.length < 4) {
-			result.innerHTML = "not a valid ip address";
+			result.textContent = "not a valid ip address";
 			return;
 		}
 
 		for (let i = 0; i < 4; i++)
 			if (isNaN(ipBytes[i]) || ipBytes[i] < 0 || ipBytes[i] > 255) {
-				result.innerHTML = "not a valid ip address";
+				result.textContent = "not a valid ip address";
 				return;
 			}
 
@@ -224,22 +224,29 @@ class LocateIp extends Console {
 					}
 
 					if (fl != "--") {
-						let divFlag = document.createElement("div");
-						divFlag.style.width = "24px";
-						divFlag.style.height = "18px";
-						divFlag.style.margin = "8px 8px 0 0";
-						divFlag.style.backgroundImage = "url(/flags/" + fl.toLocaleLowerCase() + ".svg)";
-						divFlag.style.animation = "fade-in .4s";
-						result.appendChild(divFlag);
+						result.style.backgroundSize = "24px 18px";
+						result.style.backgroundPosition = "0 8px";
+						result.style.backgroundRepeat = "no-repeat";
+						result.style.backgroundImage = `url(/flags/${fl.toLocaleLowerCase()}.svg)`;
+						result.style.paddingLeft = "28px";
+						result.style.animation = "fade-in .4s";
 					}
 
-					if (s2 == "--" && s3 == "--")
-						result.innerHTML += s1;
-					else
-						result.innerHTML += s1 + ", " + s2 + ", " + s3;
+					result.textContent += s2 == "--" && s3 == "--" ? s1 : s1 + ", " + s2 + ", " + s3;
 
-					let lon = 0;
-					let lat = 0;
+					const lat = this.BytesToFloat32([
+						bytes.charCodeAt(index + 18) & 0xff,
+						bytes.charCodeAt(index + 19) & 0xff,
+						bytes.charCodeAt(index + 20) & 0xff,
+						bytes.charCodeAt(index + 21) & 0xff
+					]);
+
+					const lon = this.BytesToFloat32([
+						bytes.charCodeAt(index + 22) & 0xff,
+						bytes.charCodeAt(index + 23) & 0xff,
+						bytes.charCodeAt(index + 24) & 0xff,
+						bytes.charCodeAt(index + 25) & 0xff
+					]);
 
 					if (lon != 0 && lat != 0) {
 						let divLocation = document.createElement("div");
@@ -249,19 +256,19 @@ class LocateIp extends Console {
 						divLocation.style.right = "32px";
 						divLocation.style.top = "4px";
 						divLocation.style.backgroundSize = "contain";
-						divLocation.style.backgroundImage = "url(res/locate.svg)";
+						divLocation.style.backgroundImage = "url(mono/locate.svg)";
 						divLocation.style.filter = "invert(1)";
 						divLocation.style.cursor = "pointer";
 						element.appendChild(divLocation);
 
-						divLocation.onclick = () => window.open("http://www.google.com/maps/place/" + split[4]);
+						divLocation.onclick = () => window.open(`http://www.google.com/maps/place/${lat},${lon}`);
 					}
 
 				} else
-					result.innerHTML = "not found";
+					result.textContent = "not found";
 
 			} else if (xhr.readyState == 4 && xhr.status == 404) {
-				result.innerHTML = "not found";
+				result.textContent = "not found";
 
 			} else if (xhr.readyState == 4 && xhr.status == 0) //disconnected
 				this.ConfirmBox("Server is unavailable.", true);
@@ -277,7 +284,16 @@ class LocateIp extends Console {
 		for (var i = array.length - 1; i >= 0; i--)
 			value = Number(value * 256) + Number(array[i]);
 		return value;
-	};
+	}
+
+	BytesToFloat32(bytes) {
+		const buffer = new ArrayBuffer(4);
+		const view = new DataView(buffer);
+		for (let i = 0; i < 4; i++) {
+			view.setUint8(i, bytes[i]);
+		}
+		return view.getFloat32(0, true);
+	}
 
 	Remove(ipaddr) {
 		if (!(ipaddr in this.hashtable)) return;
