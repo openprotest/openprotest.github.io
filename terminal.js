@@ -222,7 +222,7 @@ class Terminal extends Window {
 		const dialog = this.DialogBox("240px");
 		if (dialog === null) return;
 
-		const {okButton, innerBox} = dialog;
+		const {btnOK, innerBox} = dialog;
 
 		innerBox.style.padding = "20px";
 		innerBox.parentElement.style.maxWidth = "480px";
@@ -242,7 +242,7 @@ class Terminal extends Window {
 
 		const smoothCursorToggle = this.CreateToggle("Smooth cursor", this.args.smoothCursor, innerBox);
 
-		okButton.onclick = ()=> {
+		btnOK.onclick = ()=> {
 			this.args.ansi = ansiToggle.checkbox.checked;
 			this.args.bell = bellToggle.checkbox.checked;
 			this.args.autoScroll = autoScrollToggle.checkbox.checked;
@@ -259,9 +259,8 @@ class Terminal extends Window {
 		const dialog = this.DialogBox("180px");
 		if (dialog === null) return;
 
-		const {okButton, innerBox} = dialog;
-
-		okButton.value = "Send";
+		const {btnOK, innerBox} = dialog;
+		btnOK.value = "Send";
 
 		innerBox.style.padding = "20px";
 		innerBox.parentElement.style.maxWidth = "400px";
@@ -338,12 +337,12 @@ class Terminal extends Window {
 		};
 
 		keyInput.onkeydown = event=> {
-			if (event.key === "Enter" && !okButton.disabled) {
-				dialog.okButton.click();
+			if (event.key === "Enter" && !btnOK.disabled) {
+				dialog.btnOK.click();
 			}
 		};
 
-		okButton.onclick = ()=> {
+		btnOK.onclick = ()=> {
 			dialog.Close();
 			if (this.ws && this.ws.readyState === 1) {
 				this.ws.send(keyInput.value);

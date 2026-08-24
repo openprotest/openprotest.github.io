@@ -1,0 +1,139 @@
+.pty-content {
+	font-family: monospace;
+	position: absolute;
+	margin: 20px;
+	margin-right: 88px;
+	overflow-x: auto;
+	overflow-y: scroll;
+	scrollbar-width: none;
+	-webkit-user-select: text; user-select: text;
+}
+
+.pty-content::-webkit-scrollbar {
+	width: 0;
+	height: 8px;
+}
+
+.pty-content::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.pty-content::-webkit-scrollbar-thumb {
+	background: rgba(255,255,255,0.2);
+	border-radius: 4px;
+}
+
+.pty-minimap {
+	position: absolute;
+	top: var(--content-top, 76px);
+	right: 4px;
+	bottom: 4px;
+	width: 84px;
+	background-color: rgb(96,96,96);
+	border-left: 1px solid rgba(255,255,255,0.07);
+	border-radius: 0 0 4px 0;
+	overflow: hidden;
+	-webkit-user-select: none; user-select: none;
+	transition: .2s;
+}
+
+.pty-minimap-canvas {
+	position: absolute;
+	top: 0;
+	left: 0;
+	display: block;
+}
+
+.pty-minimap-viewport {
+	position: absolute;
+	left: 0;
+	right: 0;
+	pointer-events: none;
+	border-top: 1px solid rgba(224,224,224,.2);
+	border-bottom: 1px solid rgba(224,224,224,.2);
+	background-color: color-mix(in srgb, var(--clr-accent) 40%, transparent);
+	mix-blend-mode: plus-lighter;
+}
+
+.pty-line {
+	position: absolute;
+	left: 0;
+	right: 0;
+	height: 18px;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 18px;
+}
+
+.pty-line > span {
+	position: absolute;
+	top: 0;
+	width: 8px;
+	height: 18px;
+}
+
+.pty-status-box {
+	display: none;
+	position: sticky;
+	top: 20px;
+	left: calc(50% - 110px);
+	width: 200px;
+	padding: 20px 20px 20px 64px;
+	text-align: center;
+	z-index: 1;
+	border-radius: 4px;
+	box-shadow: var(--clr-dark) 0 0 4px;
+	font-family: var(--global-font-family);
+	font-weight: 800;
+	white-space: nowrap;
+	color: var(--clr-dark);
+	background-color: var(--clr-pane);
+	background-image: url(mono/connect.svg);
+	background-size: 48px 48px;
+	background-position: 8px 50%;
+	background-repeat: no-repeat;
+	-webkit-user-select: none; user-select: none;
+	pointer-events: none;
+}
+
+.pty-cursor {
+	position: absolute;
+	z-index: 1;
+	width: 3px;
+	height: 20px;
+	border-radius: 1px;
+	background-color: var(--clr-accent);
+	box-shadow: var(--clr-accent) 0 0 4px;
+	display: none;
+
+	transition-timing-function: ease-out;
+	animation: pty-blinking 1.2s infinite;
+}
+
+.pty-content:focus > .pty-cursor {
+	display: initial;
+}
+
+@container (max-width: 480px) {
+	.pty-content {
+		margin-right: 20px;
+		scrollbar-width: inherit;
+	}
+
+	.pty-minimap {
+		opacity: 0;
+		visibility: hidden;
+	}
+}
+
+@keyframes pty-blinking {
+	20%{opacity:1}
+	50%{opacity:.1}
+	80%{opacity:1}
+}
+
+@keyframes pty-shake {
+	15%, 85% {opacity:1; transform:rotate(-5deg)}
+	30%, 70% {opacity:1; transform:rotate(10deg)}
+	40%, 60% {opacity:1; transform:rotate(-18deg)}
+	50% {opacity:1; transform:rotate(18deg)}
+}

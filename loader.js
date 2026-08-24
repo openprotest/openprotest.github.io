@@ -20,7 +20,8 @@ const LOADER = {
 		"console.js",
 		"ipbox.js",
 		"terminal.js",
-		"wasm_exec.js"
+		"wasm_exec.js",
+		"ptyhost.js"
 	],
 	
 	secondaryScripts: [
@@ -35,7 +36,7 @@ const LOADER = {
 		"mictester.js",
 		"cameratester.js",
 		"screencapture.js",
-		"serial.js",
+		"rs232.js",
 		"chess/chess.js"
 	],
 
@@ -106,7 +107,7 @@ const LOADER = {
 		let session = [];
 
 		if (localStorage.getItem("restore_session") === "true")
-			for (let i = 0; i < WIN.array.length; i++)
+			for (let i = 0; i < WIN.array.length; i++) {
 				session.push({
 					class: WIN.array[i].constructor.name,
 					params: WIN.array[i].params,
@@ -118,6 +119,7 @@ const LOADER = {
 					width: WIN.array[i].win.style.width,
 					height: WIN.array[i].win.style.height
 				});
+		}
 
 		localStorage.setItem("session", JSON.stringify(session));
 
@@ -156,7 +158,7 @@ const LOADER = {
 
 	Invoke: (command)=> {
 		switch (command.class) {
-		case "LocateIp"      : return new LocateIp(command.params);
+		case "LocateIp"       : return new LocateIp(command.params);
 		case "MacLookup"      : return new MacLookup(command.params);
 		case "PassGen"        : return new PassGen(command.params);
 		case "Encoder"        : return new Encoder(command.params);
@@ -165,7 +167,7 @@ const LOADER = {
 		case "MicTester"      : return new MicTester(command.params);
 		case "CameraTester"   : return new CameraTester(command.params);
 		case "ScreenCapture"  : return new ScreenCapture(command.params);
-		case "SerialRS232"         : return new SerialRS232(command.params);
+		case "Rs232"          : return new Rs232(command.params);
 		case "Chess"          : return new Chess();
 		case "About"          : return new About(command.params);
 		case "Personalize"    : return new Personalize(command.params);

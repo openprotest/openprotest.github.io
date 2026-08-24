@@ -1070,6 +1070,17 @@ class Window {
 		return newSeparator;
 	}
 
+	CreateToggle(text, value, parent) {
+		const checkbox = document.createElement("input");
+		checkbox.type = "checkbox";
+		checkbox.checked = value;
+
+		parent.appendChild(checkbox);
+		const label = this.AddCheckBoxLabel(parent, checkbox, text);
+
+		return {checkbox: checkbox, label: label};
+	}
+
 	SetTitle(title = "") {
 		this.header.textContent = title;
 		this.task.setAttribute("tip", title);
