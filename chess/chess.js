@@ -64,7 +64,7 @@ class Chess extends Window {
         for (let i = 0; i < 8; i++) {
             const coord_f = document.createElement("div");
             coord_f.className = "chess-coord";
-            coord_f.innerHTML = 8-i;
+            coord_f.textContent = 8-i;
             coord_f.style.color = i % 2 === 0 ? "rgb(84,84,84)" : "rgb(108,108,108)";
             coord_f.style.left = "0";
             coord_f.style.top = i * 12.5 + "%";
@@ -72,7 +72,7 @@ class Chess extends Window {
 
             const coord_r = document.createElement("div");
             coord_r.className = "chess-coord";
-            coord_r.innerHTML = String.fromCharCode(97 + i);
+            coord_r.textContent = String.fromCharCode(97 + i);
             coord_r.style.color = i % 2 === 0 ? "rgb(108,108,108)" : "rgb(84,84,84)";
             coord_r.style.left = `calc(${(i+1) * 12.5}% - 20px)`;
             coord_r.style.bottom = "0";
@@ -530,7 +530,7 @@ class Chess extends Window {
         else
             move = `${String.fromCharCode(97+p0.x)}${8-p0.y}-${String.fromCharCode(97+p1.x)}${8-p1.y}`;
 
-        divMove.innerHTML = move;
+        divMove.textContent = move;
         this.moveslist.appendChild(divMove);
     }
 

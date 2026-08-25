@@ -73,12 +73,12 @@ class MacLookup extends Console {
 		let name = document.createElement("div");
 		name.className = "tool-label";
 		name.style.paddingLeft = "24px";
-		name.innerHTML = macaddr;
+		name.textContent = macaddr;
 		element.appendChild(name);
 
 		let result = document.createElement("div");
 		result.className = "tool-result collapsed100";
-		result.innerHTML = "";
+		result.textContent = "";
 		element.appendChild(result);
 
 		let remove = document.createElement("div");
@@ -109,7 +109,7 @@ class MacLookup extends Console {
 				result.appendChild(label);
 
 				if (isNaN(target)) {
-					label.innerHTML = "not a valid mac address";
+					label.textContent = "not a valid mac address";
 					return;
 				}
 
@@ -157,9 +157,9 @@ class MacLookup extends Console {
 						manufacturer += String.fromCharCode(char);
 					} while (char != 0 && manufacturer.length < 512);
 
-					label.innerHTML = manufacturer;
+					label.textContent = manufacturer;
 				} else {
-					label.innerHTML = "not found";
+					label.textContent = "not found";
 				}
 
 			} else if (xhr.readyState == 4 && xhr.status == 0) //disconnected

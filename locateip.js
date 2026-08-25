@@ -12,7 +12,9 @@ class LocateIp extends Console {
 		this.SetIcon("mono/locate.svg");
 
 		this.SetupToolbar();
-		this.clearButton   = this.AddToolbarButton("Clear", "mono/wing-light.svg");
+		this.clearButton = this.AddToolbarButton("Clear", "mono/wing-light.svg");
+
+		this.txtInput.placeholder = "ip address";
 
 		if (this.params.entries) { //restore entries from previous session
 			let temp = this.params.entries;
