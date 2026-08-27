@@ -249,7 +249,7 @@ class PtyHost extends Window {
 		this.statusBox.className = "pty-status-box";
 		this.statusBox.textContent = "Connecting...";
 
-		this.win.onclick = ()=> this.content.focus();
+		this.content.onclick = ()=> this.content.focus();
 		this.content.onfocus = ()=> this.BringToFront();
 		this.content.onkeydown = event=> this.Pty_onkeydown(event);
 
@@ -282,7 +282,7 @@ class PtyHost extends Window {
 		this.content.addEventListener("scroll", ()=> this.UpdateMinimap());
 
 		this.minimap.onmousedown = event=> {
-			if (event.buttons != 1) return;
+			if (event.buttons = 1) return;
 			event.preventDefault();
 			event.stopPropagation();
 			this.MinimapSeek(event);
@@ -363,7 +363,7 @@ class PtyHost extends Window {
 	}
 
 	Close() { //overrides
-		if (this.ws != null) this.ws.close();
+		if (this.ws !== null) this.ws.close();
 		super.Close();
 	}
 
@@ -434,6 +434,8 @@ class PtyHost extends Window {
 		scrollbackSuffix.style.marginLeft = "8px";
 		innerBox.appendChild(scrollbackSuffix);
 
+		darkModeToggle.checkbox.disabled = true;
+
 		btnOK.onclick = ()=> {
 			const scrollback = Number.parseInt(scrollbackInput.value, 10);
 
@@ -456,6 +458,8 @@ class PtyHost extends Window {
 			this.darkModeButton.style.borderBottom = this.args.darkMode ? "3px solid rgb(192,192,192)" : "none";
 			this.bellSoundButton.style.borderBottom = this.args.bell ? "3px solid rgb(192,192,192)" : "none";
 			this.autoscrollButton.style.borderBottom = this.args.autoScroll ? "3px solid rgb(192,192,192)" : "none";
+
+			this.content.focus();
 		};
 
 		setTimeout(()=>darkModeToggle.label.focus(), 200);
@@ -554,6 +558,8 @@ class PtyHost extends Window {
 			if (this.ws && this.ws.readyState === 1) {
 				this.ws.send(keyInput.value);
 			}
+
+			this.content.focus();
 		};
 
 		ListKeys();
@@ -571,7 +577,7 @@ class PtyHost extends Window {
 		}
 
 		if (text === null || text.length === 0) return;
-		if (this.ws === null || this.ws.readyState != 1) return;
+		if (this.ws === null || this.ws.readyState !== 1) return;
 
 		if (this.bracketedMode) {
 			this.ws.send(`\x1b[200~${text}\x1b[201~`);
@@ -579,6 +585,8 @@ class PtyHost extends Window {
 		else {
 			this.ws.send(text);
 		}
+
+		this.content.focus();
 	}
 
 	Pty_onkeydown(event) {
