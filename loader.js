@@ -168,7 +168,7 @@ const LOADER = {
 		case "CameraTester"   : return new CameraTester(command.params);
 		case "ScreenCapture"  : return new ScreenCapture(command.params);
 		case "Rs232"          : return new Rs232(command.params);
-		case "Chess"          : return new Chess();
+		case "Chess"          : return new Chess(command.params);
 		case "About"          : return new About(command.params);
 		case "Personalize"    : return new Personalize(command.params);
 		}

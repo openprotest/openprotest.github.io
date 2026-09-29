@@ -116,6 +116,27 @@ class Personalize extends Tabs {
 		optHidden.textContent = "Hidden";
 		this.scrollBarInput.appendChild(optHidden);
 
+		const divMode = document.createElement("div");
+		divMode.textContent = "Color mode: ";
+		divMode.style.display = "inline-block";
+		divMode.style.minWidth = "150px";
+		divMode.style.fontWeight = "600";
+		this.tabsPanel.appendChild(divMode);
+
+		this.modeInput = document.createElement("select");
+		this.modeInput.style.width = "200px";
+		this.tabsPanel.appendChild(this.modeInput);
+		this.tabsPanel.appendChild(document.createElement("br"));
+		this.tabsPanel.appendChild(document.createElement("br"));
+
+		const modeOptions = ["System", "Light", "Dark"];
+		for (let i = 0; i < modeOptions.length; i++) {
+			const option = document.createElement("option");
+			option.value = (modeOptions[i] === "System") ? "light dark" : modeOptions[i].toLowerCase();
+			option.textContent = modeOptions[i];
+			this.modeInput.appendChild(option);
+		}
+
 		this.tabsPanel.appendChild(document.createElement("hr"));
 		this.tabsPanel.appendChild(document.createElement("br"));
 
@@ -158,6 +179,7 @@ class Personalize extends Tabs {
 		this.chkAnimations.checked    = localStorage.getItem("animations") !== "false";
 		this.chkGlass.checked         = localStorage.getItem("glass") === "true";
 		this.scrollBarInput.value     = localStorage.getItem("scrollbar_style") ? localStorage.getItem("scrollbar_style") : "thin";
+		this.modeInput.value          = localStorage.getItem("color_mode") ? localStorage.getItem("color_mode") : "light dark";
 
 		this.saturation.value = localStorage.getItem("accent_saturation") ? localStorage.getItem("accent_saturation") : 100;
 
@@ -285,12 +307,17 @@ class Personalize extends Tabs {
 			container.className = "";
 			if (!this.chkPopOut.checked)        container.classList.add("no-popout");
 			if (!this.chkWindowShadows.checked) container.classList.add("disable-window-dropshadows");
-			if (this.chkGlass.checked)          container.classList.add("glass");
+			if (this.chkGlass.checked) {
+				UI.InstallGlassFilter();
+				container.classList.add("glass");
+			}
 
 			analog_clock.style.visibility = date_calendar.style.visibility = this.chkDateTime.checked ? "visible" : "hidden";
 			analog_clock.style.opacity = date_calendar.style.opacity = this.chkDateTime.checked ? "1" : "0";
 
 			container.classList.add(`scrollbar-${this.scrollBarInput.value}`);
+
+			document.documentElement.style.colorScheme = this.modeInput.value;
 
 			document.body.className = this.chkAnimations.checked ? "" : "disable-animations";
 
@@ -302,6 +329,7 @@ class Personalize extends Tabs {
 			localStorage.setItem("animations", this.chkAnimations.checked);
 			localStorage.setItem("glass", this.chkGlass.checked);
 			localStorage.setItem("scrollbar_style", this.scrollBarInput.value);
+			localStorage.setItem("color_mode", this.modeInput.value);
 
 			localStorage.setItem("accent_saturation", this.saturation.value);
 
@@ -316,6 +344,8 @@ class Personalize extends Tabs {
 						WIN.array[i].chkDateTime.checked      = this.chkDateTime.checked;
 						WIN.array[i].chkAnimations.checked    = this.chkAnimations.checked;
 						WIN.array[i].chkGlass.checked         = this.chkGlass.checked;
+						WIN.array[i].scrollBarInput.value     = this.scrollBarInput.value;
+						WIN.array[i].modeInput.value          = this.modeInput.value;
 
 						WIN.array[i].saturation.value = this.saturation.value;
 						WIN.array[i].divSaturationValue.textContent = `${this.saturation.value}%`;
@@ -361,6 +391,7 @@ class Personalize extends Tabs {
 		this.chkGlass.onchange         = Apply;
 		this.saturation.oninput        = Apply;
 		this.scrollBarInput.onchange   = Apply;
+		this.modeInput.onchange        = Apply;
 
 		Apply();
 	}

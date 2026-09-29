@@ -2,64 +2,229 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"math"
 	"math/rand"
-	"strconv"
 	"strings"
 )
 
+// Squares are indexed 0..63 as y*8+x, where y=0 is rank 8 and x=0 is file a.
+// Each square holds a piece byte: piece type in the low 3 bits, color in bit 3.
 type Game struct {
-	placement [8][8]Piece
+	board     [64]byte
 	color     PieceColor
-	castling  string
-	enPassant string
-	halfMove  string
-	fullMove  string
+	castling  byte    // castleWK | castleWQ | castleBK | castleBQ
+	enPassant int8    // square a pawn can capture onto en passant, or -1
+	kings     [2]int8 // king square per color
 }
 
-type PieceType byte
+type PieceType = byte
 
 const (
-	Pawn   = 0b00000001
-	Knight = 0b00000010
-	Bishop = 0b00000100
-	Rook   = 0b00001000
-	Queen  = 0b00010000
-	King   = 0b00100000
+	Empty  PieceType = 0
+	Pawn   PieceType = 1
+	Knight PieceType = 2
+	Bishop PieceType = 3
+	Rook   PieceType = 4
+	Queen  PieceType = 5
+	King   PieceType = 6
 )
 
-type PieceColor byte
+type PieceColor = byte
 
 const (
-	Black = 0
-	White = 1
+	Black PieceColor = 0
+	White PieceColor = 1
 )
 
-type Piece struct {
-	piece PieceType
-	color PieceColor
-}
-
-type Position struct {
-	x, y int
-}
+const (
+	castleWK byte = 1 << iota
+	castleWQ
+	castleBK
+	castleBQ
+)
 
 type Move struct {
-	p0, p1 Position
+	from, to int8
+}
+
+const (
+	maxPly    = 64
+	maxMoves  = 256
+	mateScore = 1000000
+	infinity  = 2000000
+
+	deltaMargin = 200 //largest positional swing a capture is expected to add on top of the captured material
+)
+
+var pieceValue = [7]int{0, 100, 300, 301, 500, 900, 0}
+
+// Piece-square tables from white's point of view, indexed like the board (a8 first).
+// Values from Tomasz Michniewski's "Simplified Evaluation Function".
+var pieceTables = [7][64]int{
+	Pawn: {
+		0, 0, 0, 0, 0, 0, 0, 0,
+		50, 50, 50, 50, 50, 50, 50, 50,
+		10, 10, 20, 30, 30, 20, 10, 10,
+		5, 5, 10, 25, 25, 10, 5, 5,
+		0, 0, 0, 20, 20, 0, 0, 0,
+		5, -5, -10, 0, 0, -10, -5, 5,
+		5, 10, 10, -20, -20, 10, 10, 5,
+		0, 0, 0, 0, 0, 0, 0, 0,
+	},
+	Knight: {
+		-50, -40, -30, -30, -30, -30, -40, -50,
+		-40, -20, 0, 0, 0, 0, -20, -40,
+		-30, 0, 10, 15, 15, 10, 0, -30,
+		-30, 5, 15, 20, 20, 15, 5, -30,
+		-30, 0, 15, 20, 20, 15, 0, -30,
+		-30, 5, 10, 15, 15, 10, 5, -30,
+		-40, -20, 0, 5, 5, 0, -20, -40,
+		-50, -40, -30, -30, -30, -30, -40, -50,
+	},
+	Bishop: {
+		-20, -10, -10, -10, -10, -10, -10, -20,
+		-10, 0, 0, 0, 0, 0, 0, -10,
+		-10, 0, 5, 10, 10, 5, 0, -10,
+		-10, 5, 5, 10, 10, 5, 5, -10,
+		-10, 0, 10, 10, 10, 10, 0, -10,
+		-10, 10, 10, 10, 10, 10, 10, -10,
+		-10, 5, 0, 0, 0, 0, 5, -10,
+		-20, -10, -10, -10, -10, -10, -10, -20,
+	},
+	Rook: {
+		0, 0, 0, 0, 0, 0, 0, 0,
+		5, 10, 10, 10, 10, 10, 10, 5,
+		-5, 0, 0, 0, 0, 0, 0, -5,
+		-5, 0, 0, 0, 0, 0, 0, -5,
+		-5, 0, 0, 0, 0, 0, 0, -5,
+		-5, 0, 0, 0, 0, 0, 0, -5,
+		-5, 0, 0, 0, 0, 0, 0, -5,
+		0, 0, 0, 5, 5, 0, 0, 0,
+	},
+	Queen: {
+		-20, -10, -10, -5, -5, -10, -10, -20,
+		-10, 0, 0, 0, 0, 0, 0, -10,
+		-10, 0, 5, 5, 5, 5, 0, -10,
+		-5, 0, 5, 5, 5, 5, 0, -5,
+		0, 0, 5, 5, 5, 5, 0, -5,
+		-10, 5, 5, 5, 5, 5, 0, -10,
+		-10, 0, 5, 0, 0, 0, 0, -10,
+		-20, -10, -10, -5, -5, -10, -10, -20,
+	},
+}
+
+var kingMiddlegameTable = [64]int{
+	-30, -40, -40, -50, -50, -40, -40, -30,
+	-30, -40, -40, -50, -50, -40, -40, -30,
+	-30, -40, -40, -50, -50, -40, -40, -30,
+	-30, -40, -40, -50, -50, -40, -40, -30,
+	-20, -30, -30, -40, -40, -30, -30, -20,
+	-10, -20, -20, -20, -20, -20, -20, -10,
+	20, 20, 0, 0, 0, 0, 20, 20,
+	20, 30, 10, 0, 0, 10, 30, 20,
+}
+
+var kingEndgameTable = [64]int{
+	-50, -40, -30, -20, -20, -30, -40, -50,
+	-30, -20, -10, 0, 0, -10, -20, -30,
+	-30, -10, 20, 30, 30, 20, -10, -30,
+	-30, -10, 30, 40, 40, 30, -10, -30,
+	-30, -10, 30, 40, 40, 30, -10, -30,
+	-30, -10, 20, 30, 30, 20, -10, -30,
+	-30, -30, 0, 0, 0, 0, -30, -30,
+	-50, -30, -30, -30, -30, -30, -30, -50,
+}
+
+// game phase: 24 with all pieces on the board, 0 with only kings and pawns
+var phaseWeight = [7]int{0, 0, 1, 1, 2, 4, 0}
+
+const maxPhase = 24
+
+// extra endgame bonus for a pawn by how many ranks it has advanced from its start, so pawns get pushed to promotion
+var pawnEndgameBonus = [6]int{0, 5, 15, 30, 50, 80}
+
+// material lead from which the winning side hunts the lone king (mop-up)
+const mopUpLead = 250
+
+// pieceSquare[piece][sq] is material plus position, signed from white's point of view. Kings are scored separately.
+var pieceSquare [16][64]int
+
+func makePiece(t PieceType, c PieceColor) byte { return t | c<<3 }
+func pieceType(p byte) PieceType               { return p & 7 }
+func pieceColor(p byte) PieceColor             { return p >> 3 }
+
+func flipColor(color PieceColor) PieceColor { return color ^ 1 }
+
+// precomputed move tables
+var (
+	knightTargets [64][]int8
+	kingTargets   [64][]int8
+	pawnCaptures  [2][64][]int8 // squares a pawn of [color] on [sq] attacks
+	rays          [64][8][]int8 // 0-3 orthogonal, 4-7 diagonal
+	castleMask    [64]byte      // castling rights kept when a piece moves from or to [sq]
+)
+
+func init() {
+	onBoard := func(x, y int) bool { return x >= 0 && x < 8 && y >= 0 && y < 8 }
+
+	knightOffsets := [8][2]int{{-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}}
+	kingOffsets := [8][2]int{{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}}
+	directions := [8][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}}
+
+	for sq := 0; sq < 64; sq++ {
+		x, y := sq%8, sq/8
+
+		for _, o := range knightOffsets {
+			if onBoard(x+o[0], y+o[1]) {
+				knightTargets[sq] = append(knightTargets[sq], int8((y+o[1])*8+x+o[0]))
+			}
+		}
+		for _, o := range kingOffsets {
+			if onBoard(x+o[0], y+o[1]) {
+				kingTargets[sq] = append(kingTargets[sq], int8((y+o[1])*8+x+o[0]))
+			}
+		}
+		for _, dx := range [2]int{-1, 1} {
+			if onBoard(x+dx, y-1) { //white pawns move up the board
+				pawnCaptures[White][sq] = append(pawnCaptures[White][sq], int8((y-1)*8+x+dx))
+			}
+			if onBoard(x+dx, y+1) {
+				pawnCaptures[Black][sq] = append(pawnCaptures[Black][sq], int8((y+1)*8+x+dx))
+			}
+		}
+		for d, dir := range directions {
+			for i := 1; onBoard(x+dir[0]*i, y+dir[1]*i); i++ {
+				rays[sq][d] = append(rays[sq][d], int8((y+dir[1]*i)*8+x+dir[0]*i))
+			}
+		}
+
+		castleMask[sq] = 0b1111
+
+		for t := Pawn; t <= Queen; t++ {
+			pieceSquare[makePiece(t, White)][sq] = pieceValue[t] + pieceTables[t][sq]
+			pieceSquare[makePiece(t, Black)][sq] = -pieceValue[t] - pieceTables[t][sq^56] //mirror vertically
+		}
+	}
+
+	castleMask[0] &^= castleBQ             //a8
+	castleMask[4] &^= castleBK | castleBQ  //e8
+	castleMask[7] &^= castleBK             //h8
+	castleMask[56] &^= castleWQ            //a1
+	castleMask[60] &^= castleWK | castleWQ //e1
+	castleMask[63] &^= castleWK            //h1
+}
+
+func squareOf(x, y int) int8 { return int8(y*8 + x) }
+
+func squareName(sq int8) string {
+	return string([]byte{'a' + byte(sq%8), '8' - byte(sq/8)})
 }
 
 func loadFen(fen *string) (Game, error) {
-	var placement [8][8]Piece
-	var color PieceColor
-	var castling string
-	var enPassant string
-	var halfMove string
-	var fullMove string
+	var game Game = Game{enPassant: -1, kings: [2]int8{-1, -1}}
 
-	var array []string = strings.Split(*fen, " ")
+	var array []string = strings.Fields(*fen)
 
-	if len(array) < 4 {
+	if len(array) < 2 {
 		return Game{}, errors.New("invalid fen")
 	}
 
@@ -67,142 +232,115 @@ func loadFen(fen *string) (Game, error) {
 	var pos_y int = 0
 
 	for i := 0; i < len(array[0]); i++ {
-		var target string = string(array[0][i])
+		var c byte = array[0][i]
 
-		if target == "/" {
+		if c == '/' {
 			pos_x = 0
 			pos_y++
 			continue
 		}
 
-		if v, err := strconv.Atoi(target); err == nil { //is a number
-			pos_x += v
+		if c >= '1' && c <= '8' {
+			pos_x += int(c - '0')
 			continue
 		}
 
-		switch target {
-		case "p":
-			placement[pos_x][pos_y] = Piece{piece: Pawn, color: Black}
-			break
-		case "n":
-			placement[pos_x][pos_y] = Piece{piece: Knight, color: Black}
-			break
-		case "b":
-			placement[pos_x][pos_y] = Piece{piece: Bishop, color: Black}
-			break
-		case "r":
-			placement[pos_x][pos_y] = Piece{piece: Rook, color: Black}
-			break
-		case "q":
-			placement[pos_x][pos_y] = Piece{piece: Queen, color: Black}
-			break
-		case "k":
-			placement[pos_x][pos_y] = Piece{piece: King, color: Black}
-			break
-
-		case "P":
-			placement[pos_x][pos_y] = Piece{piece: Pawn, color: White}
-			break
-		case "N":
-			placement[pos_x][pos_y] = Piece{piece: Knight, color: White}
-			break
-		case "B":
-			placement[pos_x][pos_y] = Piece{piece: Bishop, color: White}
-			break
-		case "R":
-			placement[pos_x][pos_y] = Piece{piece: Rook, color: White}
-			break
-		case "Q":
-			placement[pos_x][pos_y] = Piece{piece: Queen, color: White}
-			break
-		case "K":
-			placement[pos_x][pos_y] = Piece{piece: King, color: White}
-			break
+		if pos_x > 7 || pos_y > 7 {
+			return Game{}, errors.New("invalid fen")
 		}
 
+		var color PieceColor = Black
+		if c >= 'A' && c <= 'Z' {
+			color = White
+			c += 'a' - 'A'
+		}
+
+		var t PieceType
+		switch c {
+		case 'p':
+			t = Pawn
+		case 'n':
+			t = Knight
+		case 'b':
+			t = Bishop
+		case 'r':
+			t = Rook
+		case 'q':
+			t = Queen
+		case 'k':
+			t = King
+			game.kings[color] = squareOf(pos_x, pos_y)
+		default:
+			return Game{}, errors.New("invalid fen")
+		}
+
+		game.board[squareOf(pos_x, pos_y)] = makePiece(t, color)
 		pos_x++
 	}
 
-	if array[1] == "w" {
-		color = White
-	} else {
-		color = Black
+	if game.kings[White] < 0 || game.kings[Black] < 0 {
+		return Game{}, errors.New("invalid fen: missing king")
 	}
 
-	castling = array[2]
-	enPassant = array[3]
-	halfMove = array[4]
-	fullMove = array[5]
+	if array[1] == "w" {
+		game.color = White
+	} else {
+		game.color = Black
+	}
 
-	return Game{placement, color, castling, enPassant, halfMove, fullMove}, nil
+	if len(array) > 2 {
+		for _, c := range array[2] {
+			switch c {
+			case 'K':
+				game.castling |= castleWK
+			case 'Q':
+				game.castling |= castleWQ
+			case 'k':
+				game.castling |= castleBK
+			case 'q':
+				game.castling |= castleBQ
+			}
+		}
+	}
+
+	if len(array) > 3 && len(array[3]) == 2 {
+		var x int = int(array[3][0]) - 'a'
+		var rank int = int(array[3][1]) - '0'
+		if x >= 0 && x < 8 {
+			switch rank {
+			case 3, 6: //standard fen: the square behind the pawn
+				game.enPassant = squareOf(x, 8-rank)
+			case 4: //chess.js: the white pawn that just moved two squares
+				game.enPassant = squareOf(x, 5)
+			case 5: //chess.js: the black pawn that just moved two squares
+				game.enPassant = squareOf(x, 2)
+			}
+		}
+	}
+
+	return game, nil
 }
 
 func moveToString(move Move) string {
-	if move.p0.x == 0 && move.p0.y == 0 && move.p1.x == 0 && move.p1.y == 0 {
+	if move.from == move.to {
 		return ""
 	}
-
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("%c", 97+move.p0.x))
-	builder.WriteString(strconv.Itoa(8 - move.p0.y))
-	builder.WriteString("-")
-	builder.WriteString(fmt.Sprintf("%c", 97+move.p1.x))
-	builder.WriteString(strconv.Itoa(8 - move.p1.y))
-	return builder.String()
-}
-
-func flipColor(color PieceColor) PieceColor {
-	if color == White {
-		return Black
-	} else {
-		return White
-	}
+	return squareName(move.from) + "-" + squareName(move.to)
 }
 
 func printPosition(game *Game) {
+	const letters = " pnbrqk"
 	for y := 0; y < 8; y++ {
 		print(8 - y)
 		print("  ")
 		for x := 0; x < 8; x++ {
-			var l string
-
-			switch game.placement[x][y].piece {
-			case 0b00000000:
-				l = " "
-				break
-
-			case Pawn:
-				l = "p"
-				break
-
-			case Knight:
-				l = "n"
-				break
-
-			case Bishop:
-				l = "b"
-				break
-
-			case Rook:
-				l = "r"
-				break
-
-			case Queen:
-				l = "q"
-				break
-
-			case King:
-				l = "k"
-				break
+			var p byte = game.board[y*8+x]
+			var l byte = letters[pieceType(p)]
+			if p != 0 && pieceColor(p) == White {
+				l -= 'a' - 'A'
 			}
-
-			if game.placement[x][y].color == White {
-				print(strings.ToUpper(l))
-			} else {
-				print(l)
-			}
+			print(string(l))
 			print(" ")
-
 		}
 		println(" ")
 	}
@@ -210,574 +348,38 @@ func printPosition(game *Game) {
 	println(" ")
 }
 
-func pawnMoves(game *Game, color PieceColor, p *Position) []Move {
-	var moves []Move
+// isAttacked reports whether any piece of color [by] attacks square [sq].
+func (game *Game) isAttacked(sq int8, by PieceColor) bool {
+	var b *[64]byte = &game.board
 
-	if game.placement[p.x][p.y].color == White {
-
-		if game.placement[p.x][p.y-1].piece == 0 { //1 squares forward
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, p.y - 1}})
+	for _, t := range pawnCaptures[flipColor(by)][sq] {
+		if b[t] == makePiece(Pawn, by) {
+			return true
 		}
-
-		if p.y == 6 && //2 squares forward
-			game.placement[p.x][p.y-2].piece == 0 && game.placement[p.x][p.y-1].piece == 0 {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, p.y - 2}})
+	}
+	for _, t := range knightTargets[sq] {
+		if b[t] == makePiece(Knight, by) {
+			return true
 		}
-
-		if p.x > 0 && //capture left
-			game.placement[p.x-1][p.y-1].piece != 0 &&
-			game.placement[p.x-1][p.y-1].color != color {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x - 1, p.y - 1}})
-		}
-
-		if p.x < 7 && //capture right
-			game.placement[p.x+1][p.y-1].piece != 0 &&
-			game.placement[p.x+1][p.y-1].color != color {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x + 1, p.y - 1}})
-		}
-
-		if game.enPassant != "-" { //enPassant
-			var enPassant_x int = int(byte(game.enPassant[0]) - 97)
-			var enPassant_y int = int(8 - byte(game.enPassant[1]))
-			if enPassant_y == p.y && math.Abs(float64(enPassant_x-p.x)) == 1 {
-				moves = append(moves, Move{Position{p.x, p.y}, Position{enPassant_x, enPassant_y - 1}})
-			}
-		}
-
-	} else { //black
-
-		if game.placement[p.x][p.y+1].piece == 0 { //1 squares forward
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, p.y + 1}})
-		}
-
-		if p.y == 1 && //2 squares forward
-			game.placement[p.x][p.y+2].piece == 0 && game.placement[p.x][p.y+1].piece == 0 {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, p.y + 2}})
-		}
-
-		if p.x > 0 && //capture left
-			game.placement[p.x-1][p.y+1].piece != 0 &&
-			game.placement[p.x-1][p.y+1].color != color {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x - 1, p.y + 1}})
-		}
-
-		if p.x < 7 && //capture right
-			game.placement[p.x+1][p.y+1].piece != 0 &&
-			game.placement[p.x+1][p.y+1].color != color {
-			moves = append(moves, Move{Position{p.x, p.y}, Position{p.x + 1, p.y + 1}})
-		}
-
-		if game.enPassant != "-" { //enPassant
-			var enPassant_x int = int(byte(game.enPassant[0]) - 97)
-			var enPassant_y int = 8 - int(game.enPassant[1])
-			if enPassant_y == p.y && math.Abs(float64(enPassant_x-p.x)) == 1 {
-				moves = append(moves, Move{Position{p.x, p.y}, Position{enPassant_x, enPassant_y + 1}})
-			}
+	}
+	for _, t := range kingTargets[sq] {
+		if b[t] == makePiece(King, by) {
+			return true
 		}
 	}
 
-	return moves
-}
-
-func knightMoves(game *Game, color PieceColor, p *Position) []Move {
-	var moves []Move
-
-	var offsets [8][2]int = [8][2]int{
-		{-2, -1},
-		{-2, 1},
-		{-1, -2},
-		{-1, 2},
-		{1, -2},
-		{1, 2},
-		{2, -1},
-		{2, 1},
-	}
-
-	for _, offset := range offsets {
-		var x int = p.x + offset[0]
-		var y int = p.y + offset[1]
-
-		if (x < 0 || x > 7) || (y < 0 || y > 7) {
-			continue
+	var queen byte = makePiece(Queen, by)
+	for d := 0; d < 8; d++ {
+		var slider byte = makePiece(Rook, by)
+		if d >= 4 {
+			slider = makePiece(Bishop, by)
 		}
-
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			continue
-		}
-
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-	}
-
-	return moves
-}
-
-func bishopMoves(game *Game, color PieceColor, p *Position) []Move {
-	var moves []Move
-
-	for i := 1; i < 8; i++ {
-		var x int = p.x - i
-		var y int = p.y - i
-
-		if x < 0 || y < 0 {
-			break
-		}
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color != color {
-			break
-		}
-	}
-
-	for i := 1; i < 8; i++ {
-		var x int = p.x - i
-		var y int = p.y + i
-		if x < 0 || y > 7 {
-			break
-		}
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color != color {
-			break
-		}
-	}
-
-	for i := 1; i < 8; i++ {
-		var x int = p.x + i
-		var y int = p.y - i
-		if x > 7 || y < 0 {
-			break
-		}
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color != color {
-			break
-		}
-	}
-
-	for i := 1; i < 8; i++ {
-		var x int = p.x + i
-		var y int = p.y + i
-		if x > 7 || y > 7 {
-			break
-		}
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color != color {
-			break
-		}
-	}
-
-	return moves
-}
-
-func rockMoves(game *Game, color PieceColor, p *Position) []Move {
-	var moves []Move
-
-	for i := int(p.x) - 1; i > -1; i-- {
-		if game.placement[i][p.y].piece != 0 && game.placement[i][p.y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{i, p.y}})
-		if game.placement[i][p.y].piece != 0 && game.placement[i][p.y].color != color {
-			break
-		}
-	}
-
-	for i := int(p.x) + 1; i < 8; i++ {
-		if game.placement[i][p.y].piece != 0 && game.placement[i][p.y].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{i, p.y}})
-		if game.placement[i][p.y].piece != 0 && game.placement[i][p.y].color != color {
-			break
-		}
-	}
-
-	for i := int(p.y) - 1; i > -1; i-- {
-		if game.placement[p.x][i].piece != 0 && game.placement[p.x][i].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, i}})
-		if game.placement[p.x][i].piece != 0 && game.placement[p.x][i].color != color {
-			break
-		}
-	}
-
-	for i := int(p.y) + 1; i < 8; i++ {
-		if game.placement[p.x][i].piece != 0 && game.placement[p.x][i].color == color {
-			break
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{p.x, i}})
-		if game.placement[p.x][i].piece != 0 && game.placement[p.x][i].color != color {
-			break
-		}
-	}
-
-	return moves
-}
-
-func kingMoves(game *Game, color PieceColor, p *Position) []Move {
-	var moves []Move
-
-	var offset [8][2]int = [8][2]int{
-		{-1, -1}, {0, -1}, {1, -1},
-		{-1, 0}, {1, 0},
-		{-1, 1}, {0, 1}, {1, 1},
-	}
-
-	for i := 0; i < 8; i++ {
-		var x int = p.x + offset[i][0]
-		var y int = p.y + offset[i][1]
-
-		if x < 0 || x > 7 || y < 0 || y > 7 {
-			continue
-		}
-		if game.placement[x][y].piece != 0 && game.placement[x][y].color == color {
-			continue
-		}
-		moves = append(moves, Move{Position{p.x, p.y}, Position{x, y}})
-	}
-
-	if color == White {
-		if strings.Index(game.castling, "Q") > -1 &&
-			game.placement[0][7].piece == Rook && game.placement[0][7].color == White &&
-			game.placement[1][7].piece == 0 &&
-			game.placement[2][7].piece == 0 &&
-			game.placement[3][7].piece == 0 { //white queen side castling
-			moves = append(moves, Move{Position{p.x, p.y}, Position{1, p.y}})
-		}
-
-		if strings.Index(game.castling, "K") > -1 &&
-			game.placement[7][7].piece == Rook && game.placement[7][7].color == White &&
-			game.placement[5][7].piece == 0 &&
-			game.placement[6][7].piece == 0 { //white kingside castling
-			moves = append(moves, Move{Position{p.x, p.y}, Position{6, p.y}})
-		}
-
-	} else { //black king
-		if strings.Index(game.castling, "q") > -1 &&
-			game.placement[0][0].piece == Rook && game.placement[0][7].color == Black &&
-			game.placement[1][0].piece == 0 &&
-			game.placement[2][0].piece == 0 &&
-			game.placement[3][0].piece == 0 { //black queen side castling
-			moves = append(moves, Move{Position{p.x, p.y}, Position{1, p.y}})
-		}
-
-		if strings.Index(game.castling, "k") > -1 &&
-			game.placement[7][0].piece == Rook && game.placement[7][7].color == Black &&
-			game.placement[5][0].piece == 0 &&
-			game.placement[6][0].piece == 0 { //black kingside castling
-			moves = append(moves, Move{Position{p.x, p.y}, Position{6, p.y}})
-		}
-	}
-
-	return moves
-}
-
-func getPieces(game *Game, color PieceColor) []Position {
-	var pieces []Position
-
-	if color == White {
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
-				if game.placement[x][y].color == White {
-					pieces = append(pieces, Position{x: x, y: y})
+		for _, t := range rays[sq][d] {
+			if b[t] != 0 {
+				if b[t] == slider || b[t] == queen {
+					return true
 				}
-			}
-		}
-	} else {
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
-				if game.placement[x][y].color == Black {
-					pieces = append(pieces, Position{x: x, y: y})
-				}
-			}
-		}
-	}
-
-	return pieces
-}
-
-func pseudoLegalMoves(game *Game, color PieceColor) []Move {
-	var pieces []Position = getPieces(game, color)
-
-	var moves []Move
-
-	for i := 0; i < len(pieces); i++ {
-		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
-
-		switch piece.piece {
-		case Pawn:
-			var tmp []Move = pawnMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Knight:
-			var tmp []Move = knightMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Bishop:
-			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Rook:
-			var tmp []Move = rockMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Queen:
-			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-			tmp = rockMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case King:
-			var tmp []Move = kingMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-		}
-	}
-
-	return moves
-}
-
-func legalMoves(game *Game, color PieceColor) []Move {
-	//var enemyControl [8][8]bool = getEnemyControl(game)
-	var pseudoLegal []Move = pseudoLegalMoves(game, color)
-	var moves []Move
-
-	for i := 0; i < len(pseudoLegal); i++ {
-		var clone Game = makeMove(*game, pseudoLegal[i])
-		if !inCheck(clone, color) {
-			moves = append(moves, pseudoLegal[i])
-		}
-	}
-
-	return moves
-}
-
-func getEnemyControl(game *Game) [8][8]bool {
-	var area [8][8]bool
-
-	var pieces []Position = getPieces(game, flipColor(game.color))
-	var moves []Move
-
-	for i := 0; i < len(pieces); i++ {
-		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
-
-		switch piece.piece {
-		case Pawn:
-			if piece.color == White {
-				if pieces[i].x > 0 {
-					area[pieces[i].x-1][pieces[i].y-1] = true
-				}
-				if pieces[i].x < 7 {
-					area[pieces[i].x+1][pieces[i].y-1] = true
-				}
-			} else {
-				if pieces[i].x > 0 {
-					area[pieces[i].x-1][pieces[i].y+1] = true
-				}
-				if pieces[i].x < 7 {
-					area[pieces[i].x+1][pieces[i].y+1] = true
-				}
-			}
-
-		case Knight:
-			var tmp []Move = knightMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Bishop:
-			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Rook:
-			var tmp []Move = rockMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case Queen:
-			var tmp []Move = bishopMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-			tmp = rockMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-
-		case King:
-			var tmp []Move = kingMoves(game, piece.color, &pieces[i])
-			moves = append(moves, tmp...)
-		}
-	}
-
-	for i := 0; i < len(moves); i++ {
-		area[moves[i].p1.x][moves[i].p1.y] = true
-	}
-
-	return area
-}
-
-func makeMove(game Game, move Move) Game {
-	//TODO: en passant
-	//TODO: castling
-	//TODO: ...
-
-	if game.placement[move.p0.x][move.p0.y].piece == Pawn && math.Abs(float64(move.p0.y-move.p1.y)) == 2 { //en passant flag
-		game.enPassant = string([]byte{97 + byte(move.p1.x), 8 - byte(move.p1.y)})
-	} else {
-		game.enPassant = "-"
-	}
-
-	if game.placement[move.p0.x][move.p0.y].piece == Pawn && move.p0.x != move.p1.x && game.placement[move.p1.x][move.p1.y].piece == 0 { //en passant
-		game.placement[move.p1.x][move.p0.y] = Piece{0, Black}
-	}
-
-	//castling flags
-	if game.placement[move.p0.x][move.p0.y].piece == King {
-		if game.placement[move.p0.x][move.p0.y].color == White {
-			game.castling = strings.Replace(game.castling, "K", "", 1)
-			game.castling = strings.Replace(game.castling, "R", "", 1)
-		} else {
-			game.castling = strings.Replace(game.castling, "k", "", 1)
-			game.castling = strings.Replace(game.castling, "r", "", 1)
-		}
-	}
-	if game.placement[move.p0.x][move.p0.y].piece == Rook {
-		if game.placement[move.p0.x][move.p0.y].color == White { //white rock
-			if move.p0.x == 0 && move.p0.y == 7 { //queen side
-				game.castling = strings.Replace(game.castling, "Q", "", 1)
-			}
-			if move.p0.x == 7 && move.p0.y == 7 { //kingside
-				game.castling = strings.Replace(game.castling, "K", "", 1)
-			}
-		} else { //black rock
-			if move.p0.x == 0 && move.p0.y == 0 { //queen side
-				game.castling = strings.Replace(game.castling, "q", "", 1)
-			}
-			if move.p0.x == 7 && move.p0.y == 0 { //kingside
-				game.castling = strings.Replace(game.castling, "k", "", 1)
-			}
-		}
-	}
-	if len(game.castling) == 0 {
-		game.castling = "-"
-	}
-
-	//castling
-	if game.placement[move.p0.x][move.p0.y].piece == King {
-		if game.placement[move.p0.x][move.p0.y].color == White {
-			if int(move.p0.x)-int(move.p1.x) == 2 { //queen side
-				game.placement[3][7] = Piece{Rook, White}
-				game.placement[0][7] = Piece{0, White}
-			} else if int(move.p0.x)-int(move.p1.x) == -2 { //king side
-				game.placement[5][7] = Piece{Rook, White}
-				game.placement[7][7] = Piece{0, White}
-			}
-
-		} else { //black king
-			if int(move.p0.x)-int(move.p1.x) == 2 { //queen side
-				game.placement[3][0] = Piece{Rook, Black}
-				game.placement[0][0] = Piece{0, Black}
-			} else if int(move.p0.x)-int(move.p1.x) == -2 { //king side
-				game.placement[5][0] = Piece{Rook, Black}
-				game.placement[7][0] = Piece{0, Black}
-			}
-		}
-	}
-
-	//move
-	game.placement[move.p1.x][move.p1.y] = game.placement[move.p0.x][move.p0.y]
-	game.placement[move.p0.x][move.p0.y] = Piece{0, Black}
-
-	//promote
-	if game.placement[move.p1.x][move.p1.y].piece == Pawn {
-		if game.placement[move.p1.x][move.p1.y].color == White && move.p1.y == 0 { //white pawn
-			game.placement[move.p1.x][move.p1.y] = Piece{Queen, Black}
-
-		} else if game.placement[move.p1.x][move.p1.y].color == Black && move.p1.y == 7 { //black pawn
-			game.placement[move.p1.x][move.p1.y] = Piece{Queen, Black}
-		}
-	}
-
-	game.color = flipColor(game.color)
-
-	return game
-}
-
-func inCheck(game Game, color PieceColor) bool {
-	var kingsPosition Position
-	for y := 0; y < 8; y++ { //find king
-		for x := 0; x < 8; x++ {
-			if game.placement[x][y].piece == King && game.placement[x][y].color == color {
-				kingsPosition = Position{x, y}
 				break
-			}
-		}
-	}
-
-	var pieces []Position = getPieces(&game, flipColor(color))
-
-	for i := 0; i < len(pieces); i++ {
-		var piece Piece = game.placement[pieces[i].x][pieces[i].y]
-
-		switch piece.piece {
-		case Pawn:
-			var moves []Move = pawnMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-		case Knight:
-			var moves []Move = knightMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-		case Bishop:
-			var moves []Move = bishopMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-		case Rook:
-			var moves []Move = rockMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-		case Queen:
-			var moves []Move = bishopMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-			moves = rockMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
-			}
-
-		case King:
-			var moves []Move = kingMoves(&game, piece.color, &pieces[i])
-			for i := 0; i < len(moves); i++ {
-				if moves[i].p1.x == kingsPosition.x && moves[i].p1.y == kingsPosition.y {
-					return true
-				}
 			}
 		}
 	}
@@ -785,143 +387,493 @@ func inCheck(game Game, color PieceColor) bool {
 	return false
 }
 
+func (game *Game) inCheck(color PieceColor) bool {
+	return game.isAttacked(game.kings[color], flipColor(color))
+}
+
+// pseudoLegalMoves appends every move for the side to move to [moves], without checking if it leaves the king in check.
+// Castling is fully validated here. Pawns always promote to queen.
+// With [capturesOnly] quiet moves are skipped, except promotions.
+func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
+	var b *[64]byte = &game.board
+	var color PieceColor = game.color
+	var enemy PieceColor = flipColor(color)
+	var quiet bool = !capturesOnly
+
+	for from := int8(0); from < 64; from++ {
+		var p byte = b[from]
+		if p == 0 || pieceColor(p) != color {
+			continue
+		}
+
+		switch pieceType(p) {
+		case Pawn:
+			var forward int8 = 8
+			var startRank int8 = 1
+			if color == White {
+				forward = -8
+				startRank = 6
+			}
+
+			if to := from + forward; to < 0 || to > 63 { //pawn on the last rank, only possible from a malformed fen
+				continue
+			} else if b[to] == 0 && (quiet || to < 8 || to >= 56) { //1 square forward
+				moves = append(moves, Move{from, to})
+				if quiet && from/8 == startRank && b[to+forward] == 0 { //2 squares forward
+					moves = append(moves, Move{from, to + forward})
+				}
+			}
+
+			for _, to := range pawnCaptures[color][from] { //captures and en passant
+				if (b[to] != 0 && pieceColor(b[to]) == enemy) || to == game.enPassant {
+					moves = append(moves, Move{from, to})
+				}
+			}
+
+		case Knight:
+			for _, to := range knightTargets[from] {
+				if (b[to] == 0 && quiet) || (b[to] != 0 && pieceColor(b[to]) == enemy) {
+					moves = append(moves, Move{from, to})
+				}
+			}
+
+		case Bishop:
+			moves = slidingMoves(b, enemy, from, 4, 8, quiet, moves)
+
+		case Rook:
+			moves = slidingMoves(b, enemy, from, 0, 4, quiet, moves)
+
+		case Queen:
+			moves = slidingMoves(b, enemy, from, 0, 8, quiet, moves)
+
+		case King:
+			for _, to := range kingTargets[from] {
+				if (b[to] == 0 && quiet) || (b[to] != 0 && pieceColor(b[to]) == enemy) {
+					moves = append(moves, Move{from, to})
+				}
+			}
+			if quiet {
+				moves = castlingMoves(game, from, moves)
+			}
+		}
+	}
+
+	return moves
+}
+
+func slidingMoves(b *[64]byte, enemy PieceColor, from int8, dirFrom, dirTo int, quiet bool, moves []Move) []Move {
+	for d := dirFrom; d < dirTo; d++ {
+		for _, to := range rays[from][d] {
+			if b[to] == 0 {
+				if quiet {
+					moves = append(moves, Move{from, to})
+				}
+				continue
+			}
+			if pieceColor(b[to]) == enemy {
+				moves = append(moves, Move{from, to})
+			}
+			break
+		}
+	}
+	return moves
+}
+
+func castlingMoves(game *Game, from int8, moves []Move) []Move {
+	var b *[64]byte = &game.board
+	var color PieceColor = game.color
+	var enemy PieceColor = flipColor(color)
+
+	var home int8 = 4
+	var kingSide, queenSide byte = castleBK, castleBQ
+	if color == White {
+		home = 60
+		kingSide, queenSide = castleWK, castleWQ
+	}
+
+	if from != home || game.castling&(kingSide|queenSide) == 0 || game.isAttacked(home, enemy) {
+		return moves
+	}
+
+	var rook byte = makePiece(Rook, color)
+
+	if game.castling&kingSide != 0 &&
+		b[home+1] == 0 && b[home+2] == 0 && b[home+3] == rook &&
+		!game.isAttacked(home+1, enemy) && !game.isAttacked(home+2, enemy) {
+		moves = append(moves, Move{home, home + 2})
+	}
+
+	if game.castling&queenSide != 0 &&
+		b[home-1] == 0 && b[home-2] == 0 && b[home-3] == 0 && b[home-4] == rook &&
+		!game.isAttacked(home-1, enemy) && !game.isAttacked(home-2, enemy) {
+		moves = append(moves, Move{home, home - 2})
+	}
+
+	return moves
+}
+
+func legalMoves(game *Game) []Move {
+	var pseudoLegal []Move = pseudoLegalMoves(game, make([]Move, 0, maxMoves), false)
+	var moves []Move
+
+	for _, move := range pseudoLegal {
+		var next Game = *game
+		next.makeMove(move)
+		if !next.inCheck(game.color) {
+			moves = append(moves, move)
+		}
+	}
+
+	return moves
+}
+
+// makeMove plays [move] in place. Callers that need the previous position should copy the Game first.
+func (game *Game) makeMove(move Move) {
+	var b *[64]byte = &game.board
+	var piece byte = b[move.from]
+	var color PieceColor = pieceColor(piece)
+	var enPassant int8 = game.enPassant
+
+	b[move.to] = piece
+	b[move.from] = 0
+	game.enPassant = -1
+
+	switch pieceType(piece) {
+	case Pawn:
+		switch move.to - move.from {
+		case 16, -16: //en passant flag
+			game.enPassant = (move.from + move.to) / 2
+		case 7, 9, -7, -9:
+			if move.to == enPassant { //en passant capture
+				b[move.from/8*8+move.to%8] = 0
+			}
+		}
+		if move.to < 8 || move.to >= 56 { //promote
+			b[move.to] = makePiece(Queen, color)
+		}
+
+	case King:
+		game.kings[color] = move.to
+		if move.to-move.from == 2 { //kingside castling
+			b[move.from+1] = b[move.from+3]
+			b[move.from+3] = 0
+		} else if move.to-move.from == -2 { //queenside castling
+			b[move.from-1] = b[move.from-4]
+			b[move.from-4] = 0
+		}
+	}
+
+	game.castling &= castleMask[move.from] & castleMask[move.to]
+	game.color = flipColor(game.color)
+}
+
+// evaluate scores the position from the perspective of the side to move:
+// material and piece-square bonuses, with the king table blended from middlegame to endgame as pieces come off.
 func evaluate(game *Game) int {
-	var whitePieces []Position = getPieces(game, White)
-	var blackPieces []Position = getPieces(game, Black)
-
 	var score int = 0
+	var phase int = 0
+	var material [2]int
+	var pawnAdvance int = 0 //white minus black, in endgame bonus
 
-	for i := 0; i < len(whitePieces); i++ {
-		switch game.placement[whitePieces[i].x][whitePieces[i].y].piece {
-		case Pawn:
-			score += 100
-			break
+	for sq, p := range game.board {
+		if p == 0 {
+			continue
+		}
+		score += pieceSquare[p][sq]
+		phase += phaseWeight[pieceType(p)]
+		material[pieceColor(p)] += pieceValue[pieceType(p)]
 
-		case Knight:
-			score += 300
-			break
-
-		case Bishop:
-			score += 301
-			break
-
-		case Rook:
-			score += 500
-			break
-
-		case Queen:
-			score += 900
-			break
+		if pieceType(p) == Pawn {
+			if pieceColor(p) == White {
+				pawnAdvance += pawnEndgameBonus[6-sq/8]
+			} else {
+				pawnAdvance -= pawnEndgameBonus[sq/8-1]
+			}
 		}
 	}
 
-	for i := 0; i < len(blackPieces); i++ {
-		switch game.placement[blackPieces[i].x][blackPieces[i].y].piece {
-		case Pawn:
-			score -= 100
-
-		case Knight:
-			score -= 300
-			break
-
-		case Bishop:
-			score -= 301
-			break
-
-		case Rook:
-			score -= 500
-			break
-
-		case Queen:
-			score -= 900
-			break
-		}
+	if phase > maxPhase { //possible after promotions
+		phase = maxPhase
 	}
 
-	var perspective int
+	var white int8 = game.kings[White]
+	var black int8 = game.kings[Black] ^ 56
+	var kingMiddle int = kingMiddlegameTable[white] - kingMiddlegameTable[black]
+	var kingEnd int = kingEndgameTable[white] - kingEndgameTable[black]
+	score += (kingMiddle*phase + kingEnd*(maxPhase-phase)) / maxPhase
+
+	score += pawnAdvance * (maxPhase - phase) / maxPhase
+
+	//mop-up: with a clear material lead, drive the enemy king to the edge and bring the own king closer,
+	//so a won endgame makes progress towards mate instead of shuffling
+	if lead := material[White] - material[Black]; lead >= mopUpLead {
+		score += mopUp(game.kings[White], game.kings[Black]) * (maxPhase - phase) / maxPhase
+	} else if -lead >= mopUpLead {
+		score -= mopUp(game.kings[Black], game.kings[White]) * (maxPhase - phase) / maxPhase
+	}
+
 	if game.color == White {
-		perspective = 1
+		return score
+	}
+	return -score
+}
+
+func mopUp(winner, loser int8) int {
+	abs := func(v int) int {
+		if v < 0 {
+			return -v
+		}
+		return v
+	}
+	var lx, ly int = int(loser % 8), int(loser / 8)
+	var wx, wy int = int(winner % 8), int(winner / 8)
+
+	var fromCenter int = max(3-lx, lx-4) + max(3-ly, ly-4) //0 in the center, 6 in a corner
+	var kingsDistance int = abs(lx-wx) + abs(ly-wy)
+
+	return 10*fromCenter + 4*(14-kingsDistance)
+}
+
+// positionKey is the piece placement and the side to move, as in the first two fields of a fen.
+// chess.js sends the positions of the game in the same form, to avoid repetitions.
+func positionKey(game *Game) string {
+	const letters = " pnbrqk"
+	var sb strings.Builder
+	for y := 0; y < 8; y++ {
+		if y > 0 {
+			sb.WriteByte('/')
+		}
+		var blank byte = 0
+		for x := 0; x < 8; x++ {
+			var p byte = game.board[y*8+x]
+			if p == 0 {
+				blank++
+				continue
+			}
+			if blank > 0 {
+				sb.WriteByte('0' + blank)
+				blank = 0
+			}
+			var l byte = letters[pieceType(p)]
+			if pieceColor(p) == White {
+				l -= 'a' - 'A'
+			}
+			sb.WriteByte(l)
+		}
+		if blank > 0 {
+			sb.WriteByte('0' + blank)
+		}
+	}
+	if game.color == White {
+		sb.WriteString(" w")
 	} else {
-		perspective = -1
+		sb.WriteString(" b")
 	}
-
-	//TODO: more complex evaluation
-
-	return score * -perspective
+	return sb.String()
 }
 
-func calculate(game *Game, depth int) (Move, int) {
-	moves := legalMoves(game, game.color)
-	bestMove := moves[0]
-	bestScore := math.MinInt32
+type searcher struct {
+	moves   [maxPly][maxMoves]Move
+	order   [maxPly][maxMoves]int32
+	killers [maxPly][2]Move
+}
 
-	for _, move := range moves {
-		clone := makeMove(*game, move)
-		score := alphaBetaPruning(&clone, depth-1, math.MinInt32, math.MaxInt32, false)
+// orderScore ranks captures by most valuable victim / least valuable attacker, then promotions, then killer moves.
+func (s *searcher) orderScore(game *Game, move Move, ply int) int32 {
+	var attacker PieceType = pieceType(game.board[move.from])
+	var victim PieceType = pieceType(game.board[move.to])
+	var score int32 = 0
 
-		if score != 0 {
-			//printPosition(&next)
-			print("d:")
-			print(depth)
-			print(" m:")
-			print(move.p1.x)
-			print(",")
-			print(move.p1.y)
-			print(" e:")
-			print(score)
-			println(" ")
-			//println("- - - - - - - -")
-			//println(" ")
+	if victim != 0 {
+		score = 10000 + int32(victim)*16 - int32(attacker)
+	} else if attacker == Pawn && move.to == game.enPassant {
+		score = 10000 + int32(Pawn)*16 - int32(Pawn)
+	} else if move == s.killers[ply][0] {
+		score = 9000
+	} else if move == s.killers[ply][1] {
+		score = 8000
+	}
+
+	if attacker == Pawn && (move.to < 8 || move.to >= 56) {
+		score += 20000
+	}
+
+	return score
+}
+
+// scoreMoves fills the move ordering scores for [moves] at [ply].
+func (s *searcher) scoreMoves(game *Game, moves []Move, ply int) []int32 {
+	var order []int32 = s.order[ply][:len(moves)]
+	for i, move := range moves {
+		order[i] = s.orderScore(game, move, ply)
+	}
+	return order
+}
+
+// pickMove swaps the best remaining move into [i]. Cutoffs usually happen early, so a full sort is wasted work.
+func pickMove(moves []Move, order []int32, i int) {
+	var best int = i
+	for j := i + 1; j < len(moves); j++ {
+		if order[j] > order[best] {
+			best = j
+		}
+	}
+	moves[i], moves[best] = moves[best], moves[i]
+	order[i], order[best] = order[best], order[i]
+}
+
+// calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
+// so a winning side does not repeat itself, and a losing side takes the repetition.
+func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
+	var s *searcher = new(searcher)
+	var moves []Move = legalMoves(game)
+
+	if len(moves) == 0 {
+		if game.inCheck(game.color) {
+			return Move{}, -mateScore
+		}
+		return Move{}, 0
+	}
+
+	var bestScore int = -infinity
+
+	//iterative deepening: the best move of each iteration is searched first in the next, improving cutoffs
+	for d := 1; d <= depth; d++ {
+		var alpha int = -infinity
+		var bestIndex int = 0
+
+		for i, move := range moves {
+			var next Game = *game
+			next.makeMove(move)
+
+			var score int
+			if history[positionKey(&next)] {
+				score = 0 //repetition, a draw
+			} else {
+				score = -s.alphaBeta(&next, d-1, 1, -infinity, -alpha)
+			}
+
+			if score > alpha {
+				alpha = score
+				bestIndex = i
+			}
 		}
 
-		if score > bestScore {
-			bestScore = score
-			bestMove = move
+		var best Move = moves[bestIndex]
+		copy(moves[1:bestIndex+1], moves[:bestIndex])
+		moves[0] = best
+		bestScore = alpha
+	}
+
+	return moves[0], bestScore
+}
+
+// alphaBeta is a negamax search: scores are always from the perspective of the side to move.
+func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) int {
+	if depth == 0 || ply >= maxPly {
+		return s.quiesce(game, ply, alpha, beta)
+	}
+
+	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], false)
+	var order []int32 = s.scoreMoves(game, moves, ply)
+
+	var color PieceColor = game.color
+	var legal int = 0
+
+	for i := range moves {
+		pickMove(moves, order, i)
+
+		var move Move = moves[i]
+		var next Game = *game
+		next.makeMove(move)
+		if next.inCheck(color) {
+			continue
+		}
+		legal++
+
+		var score int = -s.alphaBeta(&next, depth-1, ply+1, -beta, -alpha)
+		if score > alpha {
+			alpha = score
+			if alpha >= beta {
+				if game.board[move.to] == 0 && move != s.killers[ply][0] {
+					s.killers[ply][1] = s.killers[ply][0]
+					s.killers[ply][0] = move
+				}
+				return beta
+			}
 		}
 	}
 
-	return bestMove, bestScore
+	if legal == 0 {
+		if game.inCheck(color) {
+			return -mateScore + ply //prefer faster mates
+		}
+		return 0 //stalemate
+	}
+
+	return alpha
 }
 
-func alphaBetaPruning(game *Game, depth int, alpha, beta int, maximizingPlayer bool) int {
-	if depth == 0 {
+// quiesce keeps searching captures and promotions past the depth limit until the position is quiet,
+// so the evaluation is never taken in the middle of an exchange (horizon effect).
+// When in check every evasion is searched instead, so mates at the horizon are still seen.
+func (s *searcher) quiesce(game *Game, ply int, alpha, beta int) int {
+	if ply >= maxPly {
 		return evaluate(game)
 	}
 
-	moves := legalMoves(game, game.color)
-	if !maximizingPlayer {
-		moves = legalMoves(game, flipColor(game.color))
+	var color PieceColor = game.color
+	var inCheck bool = game.inCheck(color)
+	var standPat int = -infinity
+
+	if !inCheck { //stand pat: the side to move is not forced to capture
+		standPat = evaluate(game)
+		if standPat >= beta {
+			return beta
+		}
+		if standPat > alpha {
+			alpha = standPat
+		}
 	}
 
-	if maximizingPlayer {
-		maxScore := math.MinInt32
-		for _, move := range moves {
-			clone := makeMove(*game, move)
-			score := alphaBetaPruning(&clone, depth-1, alpha, beta, false)
-			maxScore = max(maxScore, score)
-			alpha = max(alpha, score)
-			if beta <= alpha {
-				break
+	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], !inCheck)
+	var order []int32 = s.scoreMoves(game, moves, ply)
+	var legal int = 0
+
+	for i := range moves {
+		pickMove(moves, order, i)
+
+		//delta pruning: skip captures that can't raise the score to alpha even when winning the piece for free
+		var victim PieceType = pieceType(game.board[moves[i].to])
+		if !inCheck && victim != 0 && order[i] < 20000 && standPat+pieceValue[victim]+deltaMargin <= alpha {
+			continue
+		}
+
+		var next Game = *game
+		next.makeMove(moves[i])
+		if next.inCheck(color) {
+			continue
+		}
+		legal++
+
+		var score int = -s.quiesce(&next, ply+1, -beta, -alpha)
+		if score > alpha {
+			alpha = score
+			if alpha >= beta {
+				return beta
 			}
 		}
-		return maxScore
-	} else {
-		minScore := math.MaxInt32
-		for _, move := range moves {
-			clone := makeMove(*game, move)
-			score := alphaBetaPruning(&clone, depth-1, alpha, beta, true)
-			minScore = min(minScore, score)
-			beta = min(beta, score)
-			if beta <= alpha {
-				break
-			}
-		}
-		return minScore
 	}
+
+	if inCheck && legal == 0 {
+		return -mateScore + ply
+	}
+
+	return alpha
 }
 
 func randomMove(game *Game) Move {
-	var moves []Move = legalMoves(game, game.color)
+	var moves []Move = legalMoves(game)
 
 	if len(moves) == 0 {
 		return Move{}

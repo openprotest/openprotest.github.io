@@ -1,10 +1,81 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
+    static REFRACTION_SCALE = 24; //strength of the piece refraction, in pixels
+
+    static pieceMaps = {};
+
+    static GetPieceMap(name) {
+        if (Chess.pieceMaps[name]) return Chess.pieceMaps[name];
+
+        Chess.pieceMaps[name] = new Promise(resolve=> {
+            const size   = 128;
+            const radius = 6;
+
+            const image = new Image();
+            image.onload = ()=> {
+                const canvas = document.createElement("canvas");
+                canvas.width = canvas.height = size;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(image, 0, 0, size, size);
+                const pixels = ctx.getImageData(0, 0, size, size);
+
+                let height = new Float32Array(size * size);
+                for (let i = 0; i < size * size; i++)
+                    height[i] = pixels.data[i * 4 + 3] / 255;
+
+                const blur = (source, horizontal)=> {
+                    const target = new Float32Array(size * size);
+                    for (let a = 0; a < size; a++) {
+                        let sum = 0;
+                        for (let b = -radius; b <= radius; b++) {
+                            const c = Math.min(size - 1, Math.max(0, b));
+                            sum += source[horizontal ? a * size + c : c * size + a];
+                        }
+                        for (let b = 0; b < size; b++) {
+                            target[horizontal ? a * size + b : b * size + a] = sum / (radius * 2 + 1);
+                            const add = Math.min(size - 1, b + radius + 1), remove = Math.max(0, b - radius);
+                            sum += source[horizontal ? a * size + add : add * size + a] - source[horizontal ? a * size + remove : remove * size + a];
+                        }
+                    }
+                    return target;
+                };
+                for (let i = 0; i < 3; i++) height = blur(blur(height, true), false);
+
+                //the steepest slope maps to full displacement
+                const gradients = new Float32Array(size * size * 2);
+                let max = 0;
+                for (let y = 0; y < size; y++) {
+                    for (let x = 0; x < size; x++) {
+                        const i = y * size + x;
+                        const gx = height[y * size + Math.min(size - 1, x + 1)] - height[y * size + Math.max(0, x - 1)];
+                        const gy = height[Math.min(size - 1, y + 1) * size + x] - height[Math.max(0, y - 1) * size + x];
+                        gradients[i * 2] = gx;
+                        gradients[i * 2 + 1] = gy;
+                        max = Math.max(max, Math.hypot(gx, gy));
+                    }
+                }
+
+                for (let i = 0; i < size * size; i++) {
+                    pixels.data[i * 4]     = 128 - 127 * gradients[i * 2] / max; //downhill is outward
+                    pixels.data[i * 4 + 1] = 128 - 127 * gradients[i * 2 + 1] / max;
+                    pixels.data[i * 4 + 2] = 128;
+                    pixels.data[i * 4 + 3] = 255;
+                }
+                ctx.putImageData(pixels, 0, 0);
+                resolve(canvas.toDataURL("image/png"));
+            };
+            image.src = `chess/${name}.svg`;
+        });
+
+        return Chess.pieceMaps[name];
+    }
 
     constructor(args) {
         super([64,64,64]);
 
-        this.args = args ? args : null;
+        //position to continue from, only given when restoring the previous session. otherwise a new game
+        this.params = typeof args === "string" && args.length > 0 ? args : null;
 
         this.AddCssDependencies("chess/chess.css");
 
@@ -60,6 +131,8 @@ class Chess extends Window {
         this.legalMoves = [];
         this.indicators = [];
         this.isFlipped = false;
+        this.isGameOver = false;
+        this.positions = []; //PositionKey of every position of the game, for repetitions
 
         for (let i = 0; i < 8; i++) {
             const coord_f = document.createElement("div");
@@ -94,25 +167,131 @@ class Chess extends Window {
         if (this.playerA === "ai" || this.playerB === "ai") {
             this.InitWasmChessAi();
         } else {
-            if (this.args) {
-                this.LoadFen(this.args);
-            } else {
-                this.LoadFen(Chess.FEN_START);
-            }
+            this.LoadFen(this.params ?? Chess.FEN_START);
         }
     }
 
     InitWasmChessAi() {
         const go = new Go();
         WebAssembly.instantiateStreaming(fetch("chess/chess.wasm"), go.importObject).then((result) => {
-            if (this.args) {
-                this.LoadFen(this.args);
-            } else {
-                this.LoadFen(Chess.FEN_START);
-            }
+            this.LoadFen(this.params ?? Chess.FEN_START);
 
             go.run(result.instance);
+
+            if (!this.CheckGameOver()) this.PlayAiMove(); //restored on the ai's turn, or a finished game
         });
+    }
+
+    IsAiTurn() {
+        return this.game.activecolor === "w" && this.playerA === "ai" ||
+               this.game.activecolor === "b" && this.playerB === "ai";
+    }
+
+    //Asks the engine for a move, if it is the ai's turn. The engine gets the positions so far, to avoid repeating itself.
+    PlayAiMove(delay = 500) {
+        if (!this.IsAiTurn()) return;
+
+        setTimeout(()=> {
+            if (this.isClosed || this.isGameOver) return;
+
+            const aiMove = ChessAi(this.GetCurrentFen(), 1, this.positions.join(","));
+            if (typeof aiMove !== "string" || aiMove.length < 5) return; //no legal move, or an error from the engine
+
+            let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
+            let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
+
+            this.PlayMove(aiP0, aiP1, null);
+        }, delay);
+    }
+
+    //Piece placement and side to move, the part of the fen that repeats (the engine uses the same form).
+    PositionKey() {
+        return this.GetCurrentFen().split(" ").slice(0, 2).join(" ");
+    }
+
+    //Returns the result of the game, or null while it goes on.
+    GetGameResult() {
+        const color = this.game.activecolor;
+
+        let hasMove = false;
+        for (let y = 0; y < 8 && !hasMove; y++)
+            for (let x = 0; x < 8 && !hasMove; x++)
+                if (this.GetPieceColor({x:x, y:y}, this.game) === color && this.GetLegalMoves({x:x, y:y}, this.game).length > 0)
+                    hasMove = true;
+
+        if (!hasMove) {
+            if (this.InCheck(this.game, color))
+                return color === "w" ? { text:"Checkmate, black wins", score:"0-1" } : { text:"Checkmate, white wins", score:"1-0" };
+            return { text:"Stalemate, draw", score:"½-½" };
+        }
+
+        const key = this.PositionKey();
+        if (this.positions.filter(o=> o === key).length >= 3)
+            return { text:"Draw by threefold repetition", score:"½-½" };
+
+        if (this.game.halfmove >= 100)
+            return { text:"Draw by the fifty-move rule", score:"½-½" };
+
+        const pieces = this.game.placement.flat().filter(o=> o !== null && o.toLowerCase() !== "k");
+        if (pieces.length === 0 || pieces.length === 1 && "nNbB".includes(pieces[0]))
+            return { text:"Draw, insufficient material", score:"½-½" };
+
+        return null;
+    }
+
+    //Ends the game if it is over, and shows the result. Returns true when over.
+    CheckGameOver() {
+        const result = this.GetGameResult();
+        if (!result) return false;
+
+        this.isGameOver = true;
+
+        const divResult = document.createElement("div");
+        divResult.className = "chess-move";
+        divResult.textContent = result.score;
+        this.moveslist.appendChild(divResult);
+
+        const cover = document.createElement("div");
+        cover.className = "chess-cover";
+        this.content.appendChild(cover);
+
+        const box = document.createElement("div");
+        box.className = "chess-result";
+        cover.appendChild(box);
+
+        const label = document.createElement("p");
+        label.textContent = result.text;
+        box.appendChild(label);
+
+        const btnNewGame = document.createElement("input");
+        btnNewGame.type = "button";
+        btnNewGame.value = "New game";
+        box.appendChild(btnNewGame);
+
+        cover.onclick = ()=> cover.remove(); //look at the final position
+        box.onclick = event=> event.stopPropagation();
+        btnNewGame.onclick = ()=> {
+            cover.remove();
+            this.NewGame();
+        };
+
+        return true;
+    }
+
+    NewGame() {
+        this.isGameOver = false;
+        this.moveslist.textContent = "";
+        for (const cover of this.content.querySelectorAll(".chess-cover")) cover.remove();
+
+        this.LoadFen(Chess.FEN_START);
+        this.SavePosition();
+        this.PlayAiMove();
+    }
+
+    //Keeps the current position in params, which LOADER.StoreSession saves when the page unloads.
+    SavePosition() {
+        if (!this.game.fen) return; //nothing loaded yet
+        this.params = this.GetCurrentFen();
     }
 
     AfterResize() { //override
@@ -211,18 +390,22 @@ class Chess extends Window {
         this.game.activecolor = array[1];
         this.game.castling = array[2];
         this.game.enpassant = array[3];
-        this.game.lastmove = array[6];
+        this.game.halfmove = parseInt(array[4]) || 0;
+        this.game.fullmove = parseInt(array[5]) || 1;
+        this.game.lastmove = /^[a-h][1-8][a-h][1-8]$/.test(array[6]) ? array[6] : null; //non-standard 7th field
 
         for (let y = 0; y < 8; y++)
             for (let x = 0; x < 8; x++)
                 this.squares[x][y].style.boxShadow = "none";
 
-        if (array.length > 6) { //mark last move
+        if (this.game.lastmove) { //mark last move
             let p0 = {x: array[6].charCodeAt(0) - 97, y: 8 - parseInt(array[6][1]) };
             let p1 = {x: array[6].charCodeAt(2) - 97, y: 8 - parseInt(array[6][3]) };
             this.squares[p0.x][p0.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
             this.squares[p1.x][p1.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
         }
+
+        this.positions = [this.PositionKey()];
     }
 
     GetCurrentFen() {
@@ -260,7 +443,7 @@ class Chess extends Window {
         notaion += " " + this.game.enpassant;
         notaion += " " + this.game.halfmove;
         notaion += " " + this.game.fullmove;
-        notaion += " " + this.game.lastmove;
+        if (this.game.lastmove) notaion += " " + this.game.lastmove;
         return notaion;
     }
     
@@ -268,29 +451,33 @@ class Chess extends Window {
         this.game.placement[position.x][position.y] = type;
 
         const piece = document.createElement("div");
-        piece.className = "chess-piece";
-        
-        switch (type.toLowerCase()) {
-            case "k": piece.style.backgroundImage = "url(chess/king.svg)"; break;
-            case "q": piece.style.backgroundImage = "url(chess/queen.svg)"; break;
-            case "r": piece.style.backgroundImage = "url(chess/rook.svg)"; break;
-            case "n": piece.style.backgroundImage = "url(chess/knight.svg)"; break;
-            case "b": piece.style.backgroundImage = "url(chess/bishop.svg)"; break;
-            case "p": piece.style.backgroundImage = "url(chess/pawn.svg)"; break;
-        }
-        
+        piece.className = type === type.toUpperCase() ? "chess-piece chess-white" : "chess-piece";
+
         piece.style.left = position.x * 12.5 + "%";
         piece.style.top = position.y * 12.5 + "%";
 
         piece.setAttribute("p", `${position.x}${position.y}`);
 
-        if (type === type.toUpperCase())
-            piece.style.filter = "invert(1) brightness(.9)";
-
         piece.onmousedown = event => this.Piece_mousedown(event, false);
         piece.ontouchstart = event => this.Piece_mousedown(event, true);
 
         this.board.appendChild(piece);
+
+        UI.AttachGlass(piece);
+        this.SetPieceType(piece, type);
+    }
+
+    //Sets the image of a piece, and its refraction map for the glass effect.
+    SetPieceType(piece, type) {
+        const name = Chess.PIECE_NAMES[type.toLowerCase()];
+        //absolute, a relative url in a variable resolves against chess.css where it is used
+        piece.style.setProperty("--piece", `url(${new URL(`chess/${name}.svg`, document.baseURI)})`);
+        piece.pieceName = name;
+
+        Chess.GetPieceMap(name).then(map=> {
+            if (piece.pieceName !== name) return; //promoted in the meantime
+            UI.SetGlassMap(piece, map, Chess.REFRACTION_SCALE);
+        });
     }
 
     PlayMove(p0, p1, element) {
@@ -374,6 +561,14 @@ class Chess extends Window {
             this.sounds.move.play();
         }
 
+        //fifty-move rule counter, reset by pawn moves and captures
+        if (isCapture || this.game.placement[p0.x][p0.y].toLowerCase() === "p")
+            this.game.halfmove = 0;
+        else
+            this.game.halfmove++;
+
+        if (this.game.activecolor === "b") this.game.fullmove++;
+
         this.game.placement[p1.x][p1.y] = this.game.placement[p0.x][p0.y];
         this.game.placement[p0.x][p0.y] = null;
         
@@ -382,32 +577,28 @@ class Chess extends Window {
 
         element.setAttribute("p", `${p1.x}${p1.y}`);
 
+        let isPromotionPending = false;
+
         if (this.game.placement[p1.x][p1.y] === "P" && p1.y === 0 ||
             this.game.placement[p1.x][p1.y] === "p" && p1.y === 7) { //promote
-            
+
             //ai always promotes to queen
             if (this.game.activecolor === "w" && this.playerA === "ai") {
                 this.game.placement[p1.x][p1.y] = "Q";
-                element.style.backgroundImage = "url(chess/queen.svg)";
+                this.SetPieceType(element, "q");
                 //TODO: updateMoveList("Q");
 
             } else if (this.game.activecolor === "b" && this.playerB === "ai") {
                 this.game.placement[p1.x][p1.y] = "q";
-                element.style.backgroundImage = "url(chess/queen.svg)";
+                this.SetPieceType(element, "q");
                 //TODO: updateMoveList("q");
 
             } else {
+                //the position is only final once a piece is picked
+                isPromotionPending = true;
                 const callback = ()=>{
-                    setTimeout(()=>{
-                        let aiMove = ChessAi(this.GetCurrentFen(), 1);
-                        if (!aiMove) throw ("ai panic");
-                        if (aiMove.length < 5) return;
-        
-                        let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
-                        let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
-                        
-                        this.PlayMove(aiP0, aiP1, null);
-                    });
+                    this.positions[this.positions.length - 1] = this.PositionKey();
+                    if (!this.CheckGameOver()) this.PlayAiMove(0);
                 };
                 this.PromoteDialog(p1, element, callback);
             }
@@ -428,28 +619,12 @@ class Chess extends Window {
 
         this.game.lastmove = `${String.fromCharCode(97+p0.x)}${8-p0.y}${String.fromCharCode(97+p1.x)}${8-p1.y}`;
 
-        let fen = this.GetCurrentFen();
-        this.args = fen;
+        this.SavePosition();
+        this.positions.push(this.PositionKey());
 
+        if (isPromotionPending) return; //continues in the promote dialog callback
 
-        if (this.game.activecolor === "w" && this.playerA === "ai" ||
-            this.game.activecolor === "b" && this.playerB === "ai") {
-
-            if (!(this.game.placement[p1.x][p1.y] === "P" && p1.y === 0) &&
-                !(this.game.placement[p1.x][p1.y] === "p" && p1.y === 7)) { //not a promote
-                
-                setTimeout(()=>{
-                    let aiMove = ChessAi(fen, 1);
-                    if (!aiMove) throw ("ai panic");
-                    if (aiMove.length < 5) return;
-
-                    let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
-                    let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
-
-                    this.PlayMove(aiP0, aiP1, null);
-                }, 500);
-            }
-        }
+        if (!this.CheckGameOver()) this.PlayAiMove();
     }
 
     PromoteDialog(p, element, callback) {
@@ -480,13 +655,13 @@ class Chess extends Window {
 
         const updateMoveList = (l)=>{
             //TODO:
-            this.args = this.GetCurrentFen();
+            this.SavePosition();
         };
 
         q.onclick = ()=>{
             this.content.removeChild(cover);
             this.game.placement[p.x][p.y] = color === "w" ? "Q" : "q";
-            element.style.backgroundImage = "url(chess/queen.svg)";
+            this.SetPieceType(element, "q");
             callback();
             updateMoveList("Q");
         };
@@ -494,7 +669,7 @@ class Chess extends Window {
         r.onclick = ()=>{
             this.content.removeChild(cover);
             this.game.placement[p.x][p.y] = color === "w" ? "R" : "r";
-            element.style.backgroundImage = "url(chess/rook.svg)";
+            this.SetPieceType(element, "r");
             callback();
             updateMoveList("R");
         };
@@ -502,7 +677,7 @@ class Chess extends Window {
         b.onclick = ()=>{
             this.content.removeChild(cover);
             this.game.placement[p.x][p.y] = color === "w" ? "B" : "b";
-            element.style.backgroundImage = "url(chess/bishop.svg)";
+            this.SetPieceType(element, "b");
             callback();
             updateMoveList("B");
         };
@@ -510,7 +685,7 @@ class Chess extends Window {
         n.onclick = ()=>{
             this.content.removeChild(cover);
             this.game.placement[p.x][p.y] = color === "w" ? "N" : "n";
-            element.style.backgroundImage = "url(chess/knight.svg)";
+            this.SetPieceType(element, "n");
             callback();
             updateMoveList("N");
         };
@@ -920,6 +1095,7 @@ class Chess extends Window {
         if (this.game.activecolor === "b" && this.playerB === "ai") {
             return;
         }
+        if (this.isGameOver) return;
 
         let pieceColor = this.GetPieceColor({x:this.file0, y:this.rank0}, this.game);
         if (pieceColor !== this.game.activecolor) return;
@@ -927,7 +1103,7 @@ class Chess extends Window {
         if (isTouch) this.selected.style.transform = this.isFlipped ? "scale(1.2) rotate(180deg)" : "scale(1.2)";
 
         if (pieceColor === this.game.activecolor)
-            this.squares[this.file0][this.rank0].style.boxShadow = `inset rgba(192,192,192,.5) 0 0 0 ${this.board.getBoundingClientRect().width / 120}px`;
+            this.squares[this.file0][this.rank0].style.boxShadow = `inset var(--clr-accent) 0 0 0 ${this.board.getBoundingClientRect().width / 120}px`;
 
         this.ClearIndicators();
 
@@ -944,7 +1120,7 @@ class Chess extends Window {
                 indicator.style.height = "70%";
                 indicator.style.margin = "15%";
                 indicator.style.backgroundColor = "transparent";
-                indicator.style.boxShadow = `rgb(192,192,192) 0 0 0 ${this.board.getBoundingClientRect().width / 100}px`;
+                indicator.style.boxShadow = `var(--clr-accent) 0 0 0 ${this.board.getBoundingClientRect().width / 100}px`;
             }
         }
     }

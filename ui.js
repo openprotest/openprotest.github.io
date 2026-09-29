@@ -32,6 +32,8 @@ const UI = {
 		if (localStorage.getItem("w_popout") !== "true") container.classList.add("no-popout");
 		if (localStorage.getItem("w_dropshadow") === "false") container.classList.add("disable-window-dropshadows");
 		if (localStorage.getItem("glass") === "true") container.classList.add("glass");
+		UI.AttachGlass(menubox);
+		UI.AttachGlass(contextmenu);
 
 		let accentColor;
 		try {
@@ -53,6 +55,8 @@ const UI = {
 		let scrollBarStyle = localStorage.getItem("scrollbar_style") ?
 		localStorage.getItem("scrollbar_style") : "thin";
 		container.classList.add(`scrollbar-${scrollBarStyle}`);
+
+		document.documentElement.style.colorScheme = localStorage.getItem("color_mode") ?? "light dark";
 
 		UI.regionalFormat = localStorage.getItem("regional_format") ?
 			localStorage.getItem("regional_format") : "sys";
@@ -82,6 +86,136 @@ const UI = {
 				MENU.isDetached = true;
 			}
 		}
+	},
+
+	glassTemplate: null,
+
+	//Template of the glass effect: an SVG displacement filter (refraction) and a slot for any content.
+	GetGlassTemplate: ()=> {
+		if (UI.glassTemplate) return UI.glassTemplate;
+
+		const size = 128;
+		const radius    = .5; //corner radius, relative to the size
+		const edge      = .25; //width of the refracting rim, relative to the size
+		const amplitude = .6;  //displacement on the middle of the edges, the corners saturate
+		const inner     = .5 - radius;
+
+		const canvas = document.createElement("canvas");
+		canvas.width = canvas.height = size;
+		const ctx = canvas.getContext("2d");
+		const pixels = ctx.createImageData(size, size);
+		for (let y = 0; y < size; y++) {
+			for (let x = 0; x < size; x++) {
+				const px = (x + .5) / size - .5;
+				const py = (y + .5) / size - .5;
+				const qx = Math.abs(px) - inner;
+				const qy = Math.abs(py) - inner;
+
+				let distance, nx, ny;
+				if (qx > 0 && qy > 0) {
+					const length = Math.hypot(qx, qy);
+					distance = radius - length;
+					nx = qx / length;
+					ny = qy / length;
+				}
+				else if (qx > qy) {
+					distance = radius - qx;
+					nx = 1; ny = 0;
+				}
+				else {
+					distance = radius - qy;
+					nx = 0; ny = 1;
+				}
+				nx *= Math.sign(px);
+				ny *= Math.sign(py);
+
+				const strength = amplitude * Math.pow(Math.max(0, 1 - distance / edge), 2);
+
+				const i = (y * size + x) * 4;
+				pixels.data[i]     = 128 + 127 * nx * strength;
+				pixels.data[i + 1] = 128 + 127 * ny * strength;
+				pixels.data[i + 2] = 128 * (1 - .7 * Math.min(1, strength)); //unused by the filter, only for looks
+				pixels.data[i + 3] = 255;
+			}
+		}
+		ctx.putImageData(pixels, 0, 0);
+		const map = canvas.toDataURL("image/png");
+
+		//noise, added on top of the map inside the filter, so the grain has the same pixel size on any element
+		const noiseFrequency = .03; //grain size: higher is finer
+		const noiseAmount    = .3;  //how much the noise moves the backdrop, 0 disables it
+
+		const template = document.createElement("template");
+		template.innerHTML =
+			`<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">` +
+				`<filter id="displacementFilter" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">` +
+					`<feImage href="${map}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="shape"/>` +
+					`<feTurbulence type="fractalNoise" baseFrequency="${noiseFrequency}" numOctaves="2" seed="7" result="grain"/>` +
+					`<feColorMatrix in="grain" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0 1" result="noise"/>` + //opaque noise
+					`<feComposite in="shape" in2="noise" operator="arithmetic" k1="0" k2="1" k3="${noiseAmount}" k4="${-noiseAmount / 2}" result="map"/>` + //shape + (noise - .5) * amount
+					`<feDisplacementMap in="SourceGraphic" in2="map" scale="24" xChannelSelector="R" yChannelSelector="G"/>` +
+				`</filter>` +
+			`</svg>` +
+			`<slot></slot>`;
+
+		UI.glassTemplate = template;
+		return template;
+	},
+
+	//Adds the glass filter to the document (once). #displacementFilter is the prototype that UI.AttachGlass clones.
+	InstallGlassFilter: ()=> {
+		if (document.getElementById("displacementFilter")) return;
+
+		//firefox and safari accept url() in backdrop-filter but render nothing, so keep the plain blur there.
+		//navigator.userAgentData only exists in chromium browsers.
+		if ("userAgentData" in navigator) document.documentElement.classList.add("refraction");
+
+		const svg = UI.GetGlassTemplate().content.querySelector("svg").cloneNode(true);
+		svg.id = "glassFilters";
+		document.body.appendChild(svg);
+	},
+
+	glassCount: 0,
+
+	//map: optional displacement map (data url) to use instead of the rounded rectangle, see UI.SetGlassMap
+	AttachGlass: (element, map = null)=> {
+		UI.InstallGlassFilter();
+		if (element.glassFilter || !document.documentElement.classList.contains("refraction")) return;
+
+		const filter = document.getElementById("displacementFilter").cloneNode(true);
+		filter.id = `glass-${++UI.glassCount}`;
+		filter.setAttribute("filterUnits", "userSpaceOnUse");
+		const image = filter.querySelector("feImage");
+		if (map) image.setAttribute("href", map);
+		document.getElementById("glassFilters").appendChild(filter);
+
+		element.glassFilter = filter;
+		element.style.setProperty("--glass-filter", `url(#${filter.id})`);
+
+		const observer = new ResizeObserver(()=> {
+			if (!element.isConnected) { //removed from the page
+				observer.disconnect();
+				filter.remove();
+				element.glassFilter = null;
+				return;
+			}
+
+			const width = element.offsetWidth, height = element.offsetHeight;
+			if (width === 0 || height === 0) return; //hidden
+
+			for (const node of [filter, image]) {
+				node.setAttribute("width", width);
+				node.setAttribute("height", height);
+			}
+		});
+		observer.observe(element);
+	},
+
+	//Changes the displacement map and/or the strength (in pixels) of an element's glass filter.
+	SetGlassMap: (element, map = null, scale = null)=> {
+		if (!element.glassFilter) return;
+		if (map)   element.glassFilter.querySelector("feImage").setAttribute("href", map);
+		if (scale) element.glassFilter.querySelector("feDisplacementMap").setAttribute("scale", scale);
 	},
 
 	PromptAgent: (parent, command, value)=>{
@@ -378,6 +512,21 @@ const MENU = {
 		}));
 	}
 };
+
+//<glass-panel>anything you want</glass-panel>
+customElements.define("glass-panel", class extends HTMLElement {
+	constructor() {
+		super();
+		this.attachShadow({ mode: "open" }).appendChild(UI.GetGlassTemplate().content.cloneNode(true));
+	}
+
+	connectedCallback() {
+		UI.AttachGlass(this);
+		this.style.backdropFilter = document.documentElement.classList.contains("refraction") ?
+			"brightness(1.2) blur(2px) var(--glass-filter)" :
+			"brightness(1.2) blur(12px)";
+	}
+});
 
 window.addEventListener("mousedown", ()=> {
 	UI.lastActivity = Date.now();

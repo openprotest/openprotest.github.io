@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"syscall/js"
 )
 
@@ -22,8 +23,16 @@ func calc(this js.Value, i []js.Value) interface{} {
 
 	//printPosition(&game)
 
+	//positions of the game so far, comma separated (see positionKey)
+	var history map[string]bool = map[string]bool{}
+	if len(i) > 2 && i[2].Type() == js.TypeString {
+		for _, key := range strings.Split(i[2].String(), ",") {
+			history[key] = true
+		}
+	}
+
 	//var move Move = randomMove(&game)
-	var move, _ = calculate(&game, 3)
+	var move, _ = calculate(&game, 4, history)
 
 	return moveToString(move)
 }

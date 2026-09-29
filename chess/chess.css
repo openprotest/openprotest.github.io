@@ -15,11 +15,29 @@
     position: absolute;
     width: 12.5%;
     height: 12.5%;
+    background-image: var(--piece);
     background-size: contain;
     background-repeat: no-repeat;
     transition: .4s cubic-bezier(.2,.8,.3,1.2);
-
     /*cursor: url(openhand.svg) 12 12, auto;*/
+}
+
+.chess-white {
+    filter: invert(1) brightness(.9);
+}
+
+/*glass pieces are always on, independent of the "glass effect" option. .refraction is chromium only, see UI.InstallGlassFilter*/
+.refraction .chess-piece {
+    background-image: none;
+    background-color: rgba(16,16,16,.55);
+    mask: var(--piece) center / contain no-repeat;
+    backdrop-filter: brightness(.7) var(--glass-filter);
+}
+
+.refraction .chess-white {
+    filter: none;
+    background-color: rgba(255,255,255,.45);
+    backdrop-filter: brightness(1.4) var(--glass-filter);
 }
 
 /*.chess-piece:active {
@@ -30,9 +48,8 @@
     width: 30%;
     height: 30%;
     margin: 35%;
-    background-color: rgb(192,192,192);
+    background-color: var(--clr-accent);
     border-radius: 50%;
-    opacity: 50%;
 
     animation: chess-fadein .4s;
 }
@@ -53,6 +70,7 @@
     top: 0;
     bottom: 0;
     width: 250px;
+    color: rgb(192,192,192);
     background-color: rgb(72,72,72);
     transition: .2s;
 }
@@ -67,7 +85,7 @@
 }
 
 .chess-move {
-    float: left;    
+    float: left;
     width: 80px;
     padding: 4px 4px;
     margin: 4px 8px;
@@ -100,6 +118,19 @@
     min-height: 100px;
     margin: 32px auto;
     padding: 8px;
+}
+
+.chess-cover > .chess-result {
+    min-height: auto;
+    padding: 16px;
+    text-align: center;
+    color: var(--clr-dark);
+}
+
+.chess-result > p {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
 }
 
 .chess-cover > div > div {

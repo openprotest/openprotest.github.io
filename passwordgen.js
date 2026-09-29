@@ -209,7 +209,7 @@ class PassGen extends Window {
 		btnCopy.style.borderRadius = "0 4px 4px 0";
 
 		this.lblTtc = document.createElement("div");
-		this.lblTtc.style.color = "var(--clr-light)";
+		this.lblTtc.style.color = "var(--clr-contrast)";
 		this.lblTtc.style.whiteSpace = "nowrap";
 		this.content.appendChild(this.lblTtc);
 

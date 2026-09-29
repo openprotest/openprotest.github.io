@@ -35,6 +35,7 @@
 	overflow: hidden;
 	-webkit-user-select: none; user-select: none;
 	transition: .2s;
+	isolation: isolate;
 }
 
 .pty-minimap-canvas {

@@ -276,6 +276,7 @@ class Window {
 		this.win.style.zIndex = ++WIN.count;
 		this.win.className = "window";
 		container.appendChild(this.win);
+		UI.AttachGlass(this.win);
 
 		this.task = document.createElement("div");
 		this.task.setAttribute("role", "button");
@@ -665,11 +666,11 @@ class Window {
 
 		newWin.document.close();
 
+		newWin.document.body.style.colorScheme = localStorage.getItem("color_mode") ?? "light dark";
 		newWin.document.body.style.background = "none";
-		newWin.document.body.style.backgroundColor = `rgb(${this.themeColor[0]},${this.themeColor[1]},${this.themeColor[2]})`;
+		newWin.document.body.style.backgroundColor = "light-dark(rgb(168,168,168) ,rgb(64,64,64))";
 		newWin.document.body.style.padding = "0";
 		newWin.document.body.style.margin = "0";
-		if ((this.themeColor[0] + this.themeColor[1] + this.themeColor[2]) / 3 < 128) newWin.document.body.style.color = "var(--clr-light)";
 
 		if (localStorage.getItem("accent_color")) { //apply accent color
 			let accent = JSON.parse(localStorage.getItem("accent_color"));
@@ -997,6 +998,7 @@ class Window {
 		this.floating.className = "floating-menu";
 		this.floating.style.visibility = "hidden";
 		this.content.appendChild(this.floating);
+		UI.AttachGlass(this.floating);
 
 		this.floating.onmousedown = event=> event.stopPropagation();
 
@@ -1008,6 +1010,7 @@ class Window {
 		this.toolbar.className = "win-toolbar";
 		this.toolbar.setAttribute("role", "toolbar");
 		this.win.appendChild(this.toolbar);
+		UI.AttachGlass(this.toolbar);
 
 		if (this.isMaximized) {
 			this.toolbar.style.top = "38px";
@@ -1088,7 +1091,7 @@ class Window {
 
 	SetIcon(iconPath) {
 		this.icon.style.backgroundImage = `url(${iconPath})`;
-		this.titleIcon.style.backgroundImage = `url(${iconPath})`;
+		this.titleIcon.style.maskImage = `url(${iconPath})`;
 		this.iconPath = iconPath;
 	}
 
