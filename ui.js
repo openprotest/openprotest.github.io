@@ -31,7 +31,7 @@ const UI = {
 		container.className = "";
 		if (localStorage.getItem("w_popout") !== "true") container.classList.add("no-popout");
 		if (localStorage.getItem("w_dropshadow") === "false") container.classList.add("disable-window-dropshadows");
-		if (localStorage.getItem("glass") === "true") container.classList.add("glass");
+		if (localStorage.getItem("glass") !== "false") container.classList.add("glass");
 		UI.AttachGlass(menubox);
 		UI.AttachGlass(contextmenu);
 
@@ -94,8 +94,8 @@ const UI = {
 	GetGlassTemplate: ()=> {
 		if (UI.glassTemplate) return UI.glassTemplate;
 
-		const size = 128;
-		const radius    = .5; //corner radius, relative to the size
+		const size = 256;
+		const radius    = .5;  //corner radius, relative to the size
 		const edge      = .25; //width of the refracting rim, relative to the size
 		const amplitude = .6;  //displacement on the middle of the edges, the corners saturate
 		const inner     = .5 - radius;

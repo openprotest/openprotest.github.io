@@ -123,7 +123,7 @@ class Chess extends Window {
                 square.className = "chess-square";
                 square.style.left = x * 12.5 + "%";
                 square.style.top = y * 12.5 + "%";
-                square.style.backgroundColor = (x + y) % 2 === 0 ? "rgb(112,112,112)" : "rgb(88,88,88)";
+                square.style.backgroundColor = (x + y) % 2 === 0 ? "rgba(128,128,128,.8)" : "rgba(72,72,72,.8)";
                 this.board.appendChild(square);
                 this.squares[x][y] = square;
             }

@@ -177,7 +177,7 @@ class Personalize extends Tabs {
 		this.chkWindowShadows.checked = localStorage.getItem("w_dropshadow") !== "false";
 		this.chkDateTime.checked      = localStorage.getItem("desk_datetime") !== "false";
 		this.chkAnimations.checked    = localStorage.getItem("animations") !== "false";
-		this.chkGlass.checked         = localStorage.getItem("glass") === "true";
+		this.chkGlass.checked         = localStorage.getItem("glass") !== "false";
 		this.scrollBarInput.value     = localStorage.getItem("scrollbar_style") ? localStorage.getItem("scrollbar_style") : "thin";
 		this.modeInput.value          = localStorage.getItem("color_mode") ? localStorage.getItem("color_mode") : "light dark";
 
