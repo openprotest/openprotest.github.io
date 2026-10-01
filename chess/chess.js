@@ -1,7 +1,7 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
-    static REFRACTION_SCALE = 24; //strength of the piece refraction, in pixels
+    static REFRACTION_SCALE = 24;
 
     static pieceMaps = {};
 
@@ -74,8 +74,9 @@ class Chess extends Window {
     constructor(args) {
         super([64,64,64]);
 
-        //position to continue from, only given when restoring the previous session. otherwise a new game
-        this.params = typeof args === "string" && args.length > 0 ? args : null;
+        //game to continue from, only given when restoring the previous session. otherwise a new game
+        //{ history:[{fen, san}] }, or a single fen from older sessions
+        this.params = args ?? null;
 
         this.AddCssDependencies("chess/chess.css");
 
@@ -133,6 +134,9 @@ class Chess extends Window {
         this.isFlipped = false;
         this.isGameOver = false;
         this.positions = []; //PositionKey of every position of the game, for repetitions
+        this.history = [];   //{fen, san} of every position, the first one is the starting position with no move
+        this.view = 0;       //index of the shown position in history, the board is inert unless it's the last
+        this.isPromotionPending = false;
 
         for (let i = 0; i < 8; i++) {
             const coord_f = document.createElement("div");
@@ -160,21 +164,31 @@ class Chess extends Window {
         this.moveslist = document.createElement("div");
         this.moveslist.className = "chess-moveslist";
         this.sidepanel.appendChild(this.moveslist);
-            
+
+        this.win.addEventListener("keydown", event=> {
+            if (event.key === "ArrowLeft") this.ShowMove(this.view - 1);
+            else if (event.key === "ArrowRight") this.ShowMove(this.view + 1);
+            else if (event.key === "Home") this.ShowMove(0);
+            else if (event.key === "End") this.ShowMove(this.history.length - 1);
+            else return;
+            event.preventDefault();
+        });
+
         setTimeout(() => { this.AfterResize(); }, WIN.ANIME_DURATION);
         setTimeout(() => { this.AfterResize(); }, 1000);
 
         if (this.playerA === "ai" || this.playerB === "ai") {
             this.InitWasmChessAi();
-        } else {
-            this.LoadFen(this.params ?? Chess.FEN_START);
+        }
+        else {
+            this.LoadGame(this.params);
         }
     }
 
     InitWasmChessAi() {
         const go = new Go();
         WebAssembly.instantiateStreaming(fetch("chess/chess.wasm"), go.importObject).then((result) => {
-            this.LoadFen(this.params ?? Chess.FEN_START);
+            this.LoadGame(this.params);
 
             go.run(result.instance);
 
@@ -188,11 +202,13 @@ class Chess extends Window {
     }
 
     //Asks the engine for a move, if it is the ai's turn. The engine gets the positions so far, to avoid repeating itself.
+    //While an earlier position is shown, the game waits. ShowMove asks again on returning to the last one.
     PlayAiMove(delay = 500) {
         if (!this.IsAiTurn()) return;
 
         setTimeout(()=> {
             if (this.isClosed || this.isGameOver) return;
+            if (!this.IsAiTurn() || !this.IsLive()) return; //played by an earlier call, or showing history
 
             const aiMove = ChessAi(this.GetCurrentFen(), 1, this.positions.join(","));
             if (typeof aiMove !== "string" || aiMove.length < 5) return; //no legal move, or an error from the engine
@@ -209,17 +225,19 @@ class Chess extends Window {
         return this.GetCurrentFen().split(" ").slice(0, 2).join(" ");
     }
 
+    HasLegalMove(color) {
+        for (let y = 0; y < 8; y++)
+            for (let x = 0; x < 8; x++)
+                if (this.GetPieceColor({x:x, y:y}, this.game) === color && this.GetLegalMoves({x:x, y:y}, this.game).length > 0)
+                    return true;
+        return false;
+    }
+
     //Returns the result of the game, or null while it goes on.
     GetGameResult() {
         const color = this.game.activecolor;
 
-        let hasMove = false;
-        for (let y = 0; y < 8 && !hasMove; y++)
-            for (let x = 0; x < 8 && !hasMove; x++)
-                if (this.GetPieceColor({x:x, y:y}, this.game) === color && this.GetLegalMoves({x:x, y:y}, this.game).length > 0)
-                    hasMove = true;
-
-        if (!hasMove) {
+        if (!this.HasLegalMove(color)) {
             if (this.InCheck(this.game, color))
                 return color === "w" ? { text:"Checkmate, black wins", score:"0-1" } : { text:"Checkmate, white wins", score:"1-0" };
             return { text:"Stalemate, draw", score:"½-½" };
@@ -247,7 +265,7 @@ class Chess extends Window {
         this.isGameOver = true;
 
         const divResult = document.createElement("div");
-        divResult.className = "chess-move";
+        divResult.className = "chess-score";
         divResult.textContent = result.score;
         this.moveslist.appendChild(divResult);
 
@@ -280,18 +298,87 @@ class Chess extends Window {
 
     NewGame() {
         this.isGameOver = false;
-        this.moveslist.textContent = "";
         for (const cover of this.content.querySelectorAll(".chess-cover")) cover.remove();
 
-        this.LoadFen(Chess.FEN_START);
-        this.SavePosition();
+        this.LoadGame(null);
         this.PlayAiMove();
     }
 
-    //Keeps the current position in params, which LOADER.StoreSession saves when the page unloads.
+    //Loads a game from params: the moves history, a single fen, or nothing for a new game.
+    LoadGame(params) {
+        let history;
+        if (Array.isArray(params?.history) && params.history.length > 0)
+            history = params.history;
+        else if (typeof params === "string" && params.length > 0)
+            history = [{ fen: params, san: null }];
+        else
+            history = [{ fen: Chess.FEN_START, san: null }];
+
+        this.LoadFen(history[history.length - 1].fen);
+
+        this.history = history;
+        this.view = history.length - 1;
+        this.board.inert = false;
+        this.isPromotionPending = false;
+        this.positions = history.map(o=> o.fen.split(" ").slice(0, 2).join(" "));
+
+        this.moveslist.textContent = "";
+        for (let i = 1; i < history.length; i++)
+            this.AddChessNotation(i);
+        this.SelectMove();
+
+        this.SavePosition();
+    }
+
+    //Keeps the moves history in params, which LOADER.StoreSession saves when the page unloads.
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = this.GetCurrentFen();
+        this.params = { history: this.history };
+    }
+
+    IsLive() {
+        return this.view === this.history.length - 1;
+    }
+
+    //Shows the position at an index of the history. The board is inert, unless it's the last position.
+    ShowMove(index) {
+        index = Math.max(0, Math.min(this.history.length - 1, index));
+        if (index === this.view) return;
+        if (this.selected || this.isPromotionPending) return;
+
+        this.view = index;
+
+        if (this.IsLive()) {
+            this.RenderPlacement(this.game.placement, this.game.lastmove);
+        }
+        else {
+            const game = this.ParseFen(this.history[index].fen);
+            this.RenderPlacement(game.placement, game.lastmove);
+        }
+
+        this.board.inert = !this.IsLive();
+        this.SelectMove();
+
+        if (this.IsLive()) this.PlayAiMove(); //the ai waits while history is shown
+    }
+
+    //Highlights the shown move in the moves list, and scrolls it into view.
+    SelectMove() {
+        for (const element of this.moveslist.querySelectorAll(".chess-move-selected"))
+            element.classList.remove("chess-move-selected");
+
+        const element = this.moveslist.querySelector(`.chess-move[index="${this.view}"]`);
+        if (!element) {
+            if (this.view === 0) this.moveslist.scrollTop = 0;
+            return;
+        }
+
+        element.classList.add("chess-move-selected");
+
+        if (element.offsetTop < this.moveslist.scrollTop)
+            this.moveslist.scrollTop = element.offsetTop;
+        else if (element.offsetTop + element.offsetHeight > this.moveslist.scrollTop + this.moveslist.clientHeight)
+            this.moveslist.scrollTop = element.offsetTop + element.offsetHeight - this.moveslist.clientHeight;
     }
 
     AfterResize() { //override
@@ -305,7 +392,8 @@ class Chess extends Window {
             this.sidepanel.style.opacity = "1";
             this.sidepanel.style.transform = "none";
             offset = -125;
-        } else {
+        }
+        else {
             this.sidepanel.style.visibility = "hidden";
             this.sidepanel.style.opacity = "0";
             this.sidepanel.style.transform = "translateX(100%)";
@@ -347,20 +435,35 @@ class Chess extends Window {
         setTimeout(()=>{ this.board.style.transition = lastTransition }, 400);
     }
 
+    //Sets the game to a fen notation, and shows it on the board.
     LoadFen(notation) {
-        //clear all pieces
-        const pieces = this.board.querySelectorAll(".chess-piece");
-        for (const element of pieces)
-            this.board.removeChild(element);
+        const game = this.ParseFen(notation);
+        if (!game) return;
 
-        this.game.placement = [];
-        for (let i = 0; i < 8; i++)
-            this.game.placement[i] = [null, null, null, null, null, null, null, null];
+        this.game = game;
+        this.RenderPlacement(this.game.placement, this.game.lastmove);
+        this.positions = [this.PositionKey()];
+    }
 
-
+    //Returns the game object of a fen notation, or null if it's invalid.
+    ParseFen(notation) {
         let array = notation.split(" ");
-        if (array.length < 4) return;
+        if (array.length < 4) return null;
         let placement = array[0];
+
+        const game = {
+            fen: notation,
+            placement: [],
+            activecolor: array[1],
+            castling: array[2],
+            enpassant: array[3],
+            halfmove: parseInt(array[4]) || 0,
+            fullmove: parseInt(array[5]) || 1,
+            lastmove: /^[a-h][1-8][a-h][1-8]$/.test(array[6]) ? array[6] : null //non-standard 7th field
+        };
+
+        for (let i = 0; i < 8; i++)
+            game.placement[i] = [null, null, null, null, null, null, null, null];
 
         let position = { x: 0, y: 0 };
         for (let i = 0; i < placement.length; i++) {
@@ -381,31 +484,40 @@ class Chess extends Window {
             else if (position.y === 7 && target === "p")
                 target = "q";
 
-            this.AddPiece(target, position);
-            this.game.placement[position.x][position.y] = target;
+            game.placement[position.x][position.y] = target;
             position.x += 1;
         }
 
-        this.game.fen = notation;
-        this.game.activecolor = array[1];
-        this.game.castling = array[2];
-        this.game.enpassant = array[3];
-        this.game.halfmove = parseInt(array[4]) || 0;
-        this.game.fullmove = parseInt(array[5]) || 1;
-        this.game.lastmove = /^[a-h][1-8][a-h][1-8]$/.test(array[6]) ? array[6] : null; //non-standard 7th field
+        return game;
+    }
+
+    //Replaces the pieces on the board, without changing the game.
+    RenderPlacement(placement, lastmove) {
+        for (const element of this.board.querySelectorAll(".chess-piece"))
+            this.board.removeChild(element);
+
+        for (let y = 0; y < 8; y++)
+            for (let x = 0; x < 8; x++)
+                if (placement[x][y] !== null)
+                    this.AddPiece(placement[x][y], { x: x, y: y });
 
         for (let y = 0; y < 8; y++)
             for (let x = 0; x < 8; x++)
                 this.squares[x][y].style.boxShadow = "none";
 
-        if (this.game.lastmove) { //mark last move
-            let p0 = {x: array[6].charCodeAt(0) - 97, y: 8 - parseInt(array[6][1]) };
-            let p1 = {x: array[6].charCodeAt(2) - 97, y: 8 - parseInt(array[6][3]) };
-            this.squares[p0.x][p0.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
-            this.squares[p1.x][p1.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
-        }
+        this.ClearIndicators();
+        this.MarkLastMove(lastmove);
+    }
 
-        this.positions = [this.PositionKey()];
+    //Highlights the origin and the destination square of a move.
+    MarkLastMove(move) {
+        for (const square of this.board.querySelectorAll(".chess-lastmove-from, .chess-lastmove-to"))
+            square.classList.remove("chess-lastmove-from", "chess-lastmove-to");
+
+        if (!move) return;
+
+        this.squares[move.charCodeAt(0) - 97][8 - parseInt(move[1])].classList.add("chess-lastmove-from");
+        this.squares[move.charCodeAt(2) - 97][8 - parseInt(move[3])].classList.add("chess-lastmove-to");
     }
 
     GetCurrentFen() {
@@ -415,7 +527,8 @@ class Chess extends Window {
         while (true) {
             if (this.game.placement[x][y] === null) {
                 blank++;
-            } else {
+            }
+            else {
                 if (blank > 0) {
                     notaion += blank;
                     blank = 0;
@@ -448,8 +561,6 @@ class Chess extends Window {
     }
     
     AddPiece(type, position) {
-        this.game.placement[position.x][position.y] = type;
-
         const piece = document.createElement("div");
         piece.className = type === type.toUpperCase() ? "chess-piece chess-white" : "chess-piece";
 
@@ -490,12 +601,19 @@ class Chess extends Window {
 
         const pieces = Array.from(this.board.querySelectorAll(".chess-piece"));
         
+        //the element of the piece on a square, by its "p" attribute
+        const findPiece = (x, y)=> pieces.find(piece => piece !== element && piece.getAttribute("p") === `${x}${y}`);
+
         if (!element)
-            element = pieces.find(piece => piece.getAttribute("p")[0] == p0.x && piece.getAttribute("p")[1] == p0.y);
+            element = findPiece(p0.x, p0.y);
+
+        //notation needs the position before the move, promotion and check are added once it's played
+        let san = this.GetMoveNotation(p0, p1);
 
         if (this.game.placement[p0.x][p0.y].toLowerCase() === "p" && Math.abs(p0.y - p1.y) === 2) { //en passant flag
             this.game.enpassant = String.fromCharCode(97 + p1.x) + (8 - p1.y);
-        } else {
+        }
+        else {
             this.game.enpassant = "-";
         }
 
@@ -503,11 +621,8 @@ class Chess extends Window {
             this.game.placement[p1.x][p0.y] = null;
             isCapture = true;
 
-            for (const piece of pieces)
-                if (piece.style.left === p1.x * 12.5 + "%" && piece.style.top === p0.y * 12.5 + "%") {
-                    this.board.removeChild(piece);
-                    break;
-                }
+            const captured = findPiece(p1.x, p0.y);
+            if (captured) this.board.removeChild(captured);
         }
 
         //castling flags
@@ -520,54 +635,37 @@ class Chess extends Window {
         if (this.game.castling === "") this.game.castling = "-";
 
         //castling
-        if (this.game.placement[p0.x][p0.y] === "k") { //black castling
-            if (p0.x - p1.x === 2) { //queenside
-                this.game.placement[3][0] = "r";
-                this.game.placement[0][0] = null;
+        if (this.game.placement[p0.x][p0.y].toLowerCase() === "k" && Math.abs(p0.x - p1.x) === 2) {
+            const rookX0 = p1.x < p0.x ? 0 : 7; //queenside or kingside
+            const rookX1 = p1.x < p0.x ? 3 : 5;
 
-                const rock = pieces.find(ele=>ele.style.left === "0%" && ele.style.top === "0%");
-                rock.style.left = "37.5%";
+            this.game.placement[rookX1][p0.y] = this.game.placement[rookX0][p0.y];
+            this.game.placement[rookX0][p0.y] = null;
 
-            } else if (p0.x - p1.x === -2) { //kingside
-                this.game.placement[5][0] = "r";
-                this.game.placement[7][0] = null;
-
-                const rock = pieces.find(ele=>ele.style.left === "87.5%" && ele.style.top === "0%");
-                rock.style.left = "62.5%";
-            }
-        }
-
-        if (this.game.placement[p0.x][p0.y] === "K") { //white castling
-            if (p0.x - p1.x === 2) { //queenside
-                this.game.placement[3][7] = "R";
-                this.game.placement[0][7] = null;
-
-                const rock = pieces.find(ele=>ele.style.left === "0%" && ele.style.top === "87.5%");
-                rock.style.left = "37.5%";
-
-            } else if (p0.x - p1.x === -2) { //kingside
-                this.game.placement[5][7] = "R";
-                this.game.placement[7][7] = null;
-
-                const rock = pieces.find(ele=>ele.style.left === "87.5%" && ele.style.top === "87.5%");
-                rock.style.left = "62.5%";
+            const rook = findPiece(rookX0, p0.y);
+            if (rook) {
+                rook.style.left = rookX1 * 12.5 + "%";
+                rook.setAttribute("p", `${rookX1}${p0.y}`);
             }
         }
 
         if (this.game.placement[p1.x][p1.y] !== null) { //capture a piece
-            const captured = pieces.find(ele => ele !== element && ele.style.left === p1.x * 12.5 + "%" && ele.style.top === p1.y * 12.5 + "%");
+            const captured = findPiece(p1.x, p1.y);
             if (captured) this.board.removeChild(captured);
             isCapture = true;
             this.sounds.capture.play();
-        } else {
+        }
+        else {
             this.sounds.move.play();
         }
 
         //fifty-move rule counter, reset by pawn moves and captures
-        if (isCapture || this.game.placement[p0.x][p0.y].toLowerCase() === "p")
+        if (isCapture || this.game.placement[p0.x][p0.y].toLowerCase() === "p") {
             this.game.halfmove = 0;
-        else
+        }
+        else {
             this.game.halfmove++;
+        }
 
         if (this.game.activecolor === "b") this.game.fullmove++;
 
@@ -579,54 +677,104 @@ class Chess extends Window {
 
         element.setAttribute("p", `${p1.x}${p1.y}`);
 
-        let isPromotionPending = false;
+        const isPromotion = this.game.placement[p1.x][p1.y] === "P" && p1.y === 0 ||
+                            this.game.placement[p1.x][p1.y] === "p" && p1.y === 7;
 
-        if (this.game.placement[p1.x][p1.y] === "P" && p1.y === 0 ||
-            this.game.placement[p1.x][p1.y] === "p" && p1.y === 7) { //promote
+        //once the position is final, the move goes to the history
+        const record = ()=> {
+            if (isPromotion) san += "=" + this.game.placement[p1.x][p1.y].toUpperCase();
+            san += this.GetCheckNotation();
 
+            this.positions.push(this.PositionKey());
+            this.history.push({ fen: this.GetCurrentFen(), san: san });
+            this.view = this.history.length - 1;
+            this.AddChessNotation(this.view);
+            this.SelectMove();
+            this.SavePosition();
+        };
+
+        if (isPromotion) {
             //ai always promotes to queen
             if (this.game.activecolor === "w" && this.playerA === "ai") {
                 this.game.placement[p1.x][p1.y] = "Q";
                 this.SetPieceType(element, "q");
-                //TODO: updateMoveList("Q");
-
-            } else if (this.game.activecolor === "b" && this.playerB === "ai") {
+            }
+            else if (this.game.activecolor === "b" && this.playerB === "ai") {
                 this.game.placement[p1.x][p1.y] = "q";
                 this.SetPieceType(element, "q");
-                //TODO: updateMoveList("q");
-
-            } else {
+            }
+            else {
                 //the position is only final once a piece is picked
-                isPromotionPending = true;
+                this.isPromotionPending = true;
                 const callback = ()=>{
-                    this.positions[this.positions.length - 1] = this.PositionKey();
+                    this.isPromotionPending = false;
+                    record();
                     if (!this.CheckGameOver()) this.PlayAiMove(0);
                 };
                 this.PromoteDialog(p1, element, callback);
             }
         }
-        
+
         this.game.activecolor = this.game.activecolor === "w" ? "b" : "w";
 
-        this.AddChessNotation(p0, p1, isCapture);
-
-        for (let y = 0; y < 8; y++)
-            for (let x = 0; x < 8; x++)
+        for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
                 this.squares[x][y].style.boxShadow = "none";
-
-        setTimeout(()=>{
-            this.squares[p0.x][p0.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
-            this.squares[p1.x][p1.y].style.boxShadow = "inset var(--theme-color) 0 0 2px 2px";
-        }, 0);
+            }
+        }
 
         this.game.lastmove = `${String.fromCharCode(97+p0.x)}${8-p0.y}${String.fromCharCode(97+p1.x)}${8-p1.y}`;
+        this.MarkLastMove(this.game.lastmove);
 
-        this.SavePosition();
-        this.positions.push(this.PositionKey());
+        if (this.isPromotionPending) return; //continues in the promote dialog callback
 
-        if (isPromotionPending) return; //continues in the promote dialog callback
+        record();
 
         if (!this.CheckGameOver()) this.PlayAiMove();
+    }
+
+    //Standard algebraic notation of a move, from the position before it's played. Without promotion and check.
+    GetMoveNotation(p0, p1) {
+        const piece = this.game.placement[p0.x][p0.y];
+        const type = piece.toLowerCase();
+        const file = String.fromCharCode(97 + p0.x);
+        const rank = String(8 - p0.y);
+        const target = String.fromCharCode(97 + p1.x) + (8 - p1.y);
+
+        if (type === "k" && Math.abs(p1.x - p0.x) === 2)
+            return p1.x > p0.x ? "O-O" : "O-O-O";
+
+        if (type === "p") //a diagonal pawn move is always a capture, en passant included
+            return p0.x !== p1.x ? `${file}x${target}` : target;
+
+        //other pieces of the same kind that can move to the same square
+        let isAmbiguous = false, sameFile = false, sameRank = false;
+        for (let y = 0; y < 8; y++)
+            for (let x = 0; x < 8; x++) {
+                if (x === p0.x && y === p0.y) continue;
+                if (this.game.placement[x][y] !== piece) continue;
+                if (!this.GetLegalMoves({ x: x, y: y }, this.game).some(o=> o.x === p1.x && o.y === p1.y)) continue;
+                isAmbiguous = true;
+                if (x === p0.x) sameFile = true;
+                if (y === p0.y) sameRank = true;
+            }
+
+        let from = "";
+        if (isAmbiguous) {
+            if (!sameFile) from = file;
+            else if (!sameRank) from = rank;
+            else from = file + rank;
+        }
+
+        const capture = this.game.placement[p1.x][p1.y] !== null ? "x" : "";
+        return type.toUpperCase() + from + capture + target;
+    }
+
+    //"+" for check, "#" for checkmate, of the side to move.
+    GetCheckNotation() {
+        const color = this.game.activecolor;
+        if (!this.InCheck(this.game, color)) return "";
+        return this.HasLegalMove(color) ? "+" : "#";
     }
 
     PromoteDialog(p, element, callback) {
@@ -655,17 +803,11 @@ class Chess extends Window {
 
         let color = this.GetPieceColor(p, this.game);
 
-        const updateMoveList = (l)=>{
-            //TODO:
-            this.SavePosition();
-        };
-
         q.onclick = ()=>{
             this.content.removeChild(cover);
             this.game.placement[p.x][p.y] = color === "w" ? "Q" : "q";
             this.SetPieceType(element, "q");
             callback();
-            updateMoveList("Q");
         };
 
         r.onclick = ()=>{
@@ -673,7 +815,6 @@ class Chess extends Window {
             this.game.placement[p.x][p.y] = color === "w" ? "R" : "r";
             this.SetPieceType(element, "r");
             callback();
-            updateMoveList("R");
         };
 
         b.onclick = ()=>{
@@ -681,7 +822,6 @@ class Chess extends Window {
             this.game.placement[p.x][p.y] = color === "w" ? "B" : "b";
             this.SetPieceType(element, "b");
             callback();
-            updateMoveList("B");
         };
 
         n.onclick = ()=>{
@@ -689,25 +829,35 @@ class Chess extends Window {
             this.game.placement[p.x][p.y] = color === "w" ? "N" : "n";
             this.SetPieceType(element, "n");
             callback();
-            updateMoveList("N");
         };
     }
 
-    AddChessNotation(p0, p1, isCapture) {
-        let piece = this.game.placement[p1.x][p1.y];
-        if (piece.toLowerCase() === "p") piece = "";
+    //Adds the move at an index of the history to the moves list, as rows of: number, white move, black move.
+    AddChessNotation(index) {
+        const entry = this.history[index];
+        const after = entry.fen.split(" ");
+        const isWhite = after[1] === "b"; //black to move after a white move
+        const number = isWhite ? parseInt(after[5]) : parseInt(after[5]) - 1;
+
+        if (isWhite || index === 1) { //new row, a game can start on black's move
+            const divNumber = document.createElement("div");
+            divNumber.className = "chess-move-number";
+            divNumber.textContent = `${number}.`;
+            this.moveslist.appendChild(divNumber);
+
+            if (!isWhite) {
+                const divEmpty = document.createElement("div");
+                divEmpty.className = "chess-move-empty";
+                divEmpty.textContent = "...";
+                this.moveslist.appendChild(divEmpty);
+            }
+        }
 
         const divMove = document.createElement("div");
         divMove.className = "chess-move";
-
-        let move = "", label = "";
-
-        if (isCapture)
-            move = `${String.fromCharCode(97+p0.x)}${8-p0.y}x${String.fromCharCode(97+p1.x)}${8-p1.y}`;
-        else
-            move = `${String.fromCharCode(97+p0.x)}${8-p0.y}-${String.fromCharCode(97+p1.x)}${8-p1.y}`;
-
-        divMove.textContent = move;
+        divMove.textContent = entry.san;
+        divMove.setAttribute("index", index);
+        divMove.onclick = ()=> this.ShowMove(index);
         this.moveslist.appendChild(divMove);
     }
 
@@ -755,8 +905,8 @@ class Chess extends Window {
                     if (y === p.y && Math.abs(x - p.x) === 1)
                         moves.push({ x: x, y: y - 1 });
                 }
-
-            } else {
+            }
+            else {
                 if (game.placement[p.x][p.y + 1] === null) //1 squares forward
                     moves.push({ x: p.x, y: p.y + 1 });
 
@@ -890,7 +1040,8 @@ class Chess extends Window {
                     moves.push({ x: p.x + 2, y: p.y });
                 }
 
-            } else if (color === "b") {
+            }
+            else if (color === "b") {
                 if (game.castling.indexOf("q") > -1 &&
                     game.placement[0][0] === "r" &&
                     game.placement[1][0] === null &&
@@ -1024,12 +1175,14 @@ class Chess extends Window {
                     if (pieceColor === "w") {
                         if (x > 0) area[x-1][y-1] = true;
                         if (x < 7) area[x+1][y-1] = true;
-                    } else {
+                    }
+                    else {
                         if (x > 0) area[x-1][y+1] = true;
                         if (x < 7) area[x+1][y+1] = true;
                     }
 
-                } else {
+                }
+                else {
                     let moves = this.GetPseudoLegalMoves(p, game);
                     for (let k = 0; k < moves.length; k++) {
                         area[moves[k].x][moves[k].y] = true;
@@ -1178,7 +1331,8 @@ class Chess extends Window {
             if (isLegal) {
                 this.PlayMove({ x: this.file0, y: this.rank0 }, { x: file1, y: rank1 }, this.selected);
 
-            } else { //undo
+            }
+            else { //undo
                 this.selected.style.left = this.file0 * 12.5 + "%";
                 this.selected.style.top = this.rank0 * 12.5 + "%";
                 //this.sounds.illegal.play();
