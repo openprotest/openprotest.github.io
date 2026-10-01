@@ -210,14 +210,48 @@ class Chess extends Window {
             if (this.isClosed || this.isGameOver) return;
             if (!this.IsAiTurn() || !this.IsLive()) return; //played by an earlier call, or showing history
 
-            const aiMove = ChessAi(this.GetCurrentFen(), 1, this.positions.join(","));
-            if (typeof aiMove !== "string" || aiMove.length < 5) return; //no legal move, or an error from the engine
+            let aiMove = null;
+            try {
+                aiMove = ChessAi(this.GetCurrentFen(), 1, this.positions.join(","));
+            }
+            catch (ex) {
+                console.error(ex);
+            }
 
-            let aiP0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
-            let aiP1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
+            let move = this.ParseAiMove(aiMove);
+            if (!move) { //no answer, or an error from the engine. a legal move keeps the game going instead of stalling
+                console.warn("ChessAi returned an invalid move:", aiMove);
+                move = this.GetRandomLegalMove();
+                if (!move) return;
+            }
 
-            this.PlayMove(aiP0, aiP1, null);
+            this.PlayMove(move.p0, move.p1, null);
         }, delay);
+    }
+
+    //Returns {p0, p1} from the engine's "e2-e4" form, or null if it's not a legal move of the side to move.
+    ParseAiMove(aiMove) {
+        if (typeof aiMove !== "string" || !/^[a-h][1-8]-[a-h][1-8]$/.test(aiMove)) return null;
+
+        const p0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
+        const p1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
+
+        if (this.GetPieceColor(p0, this.game) !== this.game.activecolor) return null;
+        if (!this.GetLegalMoves(p0, this.game).some(o=> o.x === p1.x && o.y === p1.y)) return null;
+
+        return { p0: p0, p1: p1 };
+    }
+
+    GetRandomLegalMove() {
+        const moves = [];
+        for (let y = 0; y < 8; y++)
+            for (let x = 0; x < 8; x++)
+                if (this.GetPieceColor({x:x, y:y}, this.game) === this.game.activecolor)
+                    for (const p1 of this.GetLegalMoves({x:x, y:y}, this.game))
+                        moves.push({ p0: {x:x, y:y}, p1: p1 });
+
+        if (moves.length === 0) return null;
+        return moves[Math.floor(Math.random() * moves.length)];
     }
 
     //Piece placement and side to move, the part of the fen that repeats (the engine uses the same form).

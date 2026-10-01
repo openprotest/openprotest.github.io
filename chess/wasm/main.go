@@ -11,7 +11,15 @@ func main() {
 	<-c
 }
 
-func calc(this js.Value, i []js.Value) interface{} {
+func calc(this js.Value, i []js.Value) (result interface{}) {
+	//a panic would exit the go program, and every later call would fail. answer "" (no move) instead
+	defer func() {
+		if r := recover(); r != nil {
+			println("ChessAi:", r)
+			result = ""
+		}
+	}()
+
 	var fen string = i[0].String()
 	//var depth string = i[1].String()
 

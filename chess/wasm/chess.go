@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand"
 	"strings"
+	"time"
 )
 
 // Squares are indexed 0..63 as y*8+x, where y=0 is rank 8 and x=0 is file a.
@@ -53,6 +54,11 @@ const (
 	infinity  = 2000000
 
 	deltaMargin = 200 //largest positional swing a capture is expected to add on top of the captured material
+
+	//the search runs on the browser's main thread, so it must stay short in any position
+	nodeBudget        = 1000000                 //nodes per move, a few hundred ms natively
+	timeBudget        = 1500 * time.Millisecond //backstop for slow devices and browsers
+	checkEvasionDepth = 4                       //quiescence plies that search every check evasion
 )
 
 var pieceValue = [7]int{0, 100, 300, 301, 500, 900, 0}
@@ -259,6 +265,12 @@ func loadFen(fen *string) (Game, error) {
 		switch c {
 		case 'p':
 			t = Pawn
+			if pos_y == 0 || pos_y == 7 { //a pawn can't stay on the last rank, auto-promote like chess.js
+				if (color == White) != (pos_y == 0) {
+					return Game{}, errors.New("invalid fen: pawn on the first rank")
+				}
+				t = Queen
+			}
 		case 'n':
 			t = Knight
 		case 'b':
@@ -676,6 +688,19 @@ type searcher struct {
 	moves   [maxPly][maxMoves]Move
 	order   [maxPly][maxMoves]int32
 	killers [maxPly][2]Move
+
+	nodes    int
+	deadline time.Time
+	aborted  bool //out of nodes or time, the running iteration is discarded
+}
+
+// visit counts a node, and reports false once the search is out of nodes or time.
+func (s *searcher) visit() bool {
+	s.nodes++
+	if s.nodes > nodeBudget || s.nodes&1023 == 0 && time.Now().After(s.deadline) {
+		s.aborted = true
+	}
+	return !s.aborted
 }
 
 // orderScore ranks captures by most valuable victim / least valuable attacker, then promotions, then killer moves.
@@ -724,8 +749,9 @@ func pickMove(moves []Move, order []int32, i int) {
 
 // calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
 // so a winning side does not repeat itself, and a losing side takes the repetition.
+// Search stops at the node and time budget, and returns the best move of the last completed depth.
 func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
-	var s *searcher = new(searcher)
+	var s *searcher = &searcher{deadline: time.Now().Add(timeBudget)}
 	var moves []Move = legalMoves(game)
 
 	if len(moves) == 0 {
@@ -740,7 +766,7 @@ func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 	//iterative deepening: the best move of each iteration is searched first in the next, improving cutoffs
 	for d := 1; d <= depth; d++ {
 		var alpha int = -infinity
-		var bestIndex int = 0
+		var bestIndex int = -1
 
 		for i, move := range moves {
 			var next Game = *game
@@ -753,10 +779,19 @@ func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 				score = -s.alphaBeta(&next, d-1, 1, -infinity, -alpha)
 			}
 
+			if s.aborted {
+				break
+			}
+
 			if score > alpha {
 				alpha = score
 				bestIndex = i
 			}
+		}
+
+		//keep the previous depth's move. on the first depth, the best of the moves searched so far
+		if s.aborted && (d > 1 || bestIndex < 0) {
+			break
 		}
 
 		var best Move = moves[bestIndex]
@@ -770,8 +805,12 @@ func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 
 // alphaBeta is a negamax search: scores are always from the perspective of the side to move.
 func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) int {
+	if !s.visit() {
+		return 0
+	}
+
 	if depth == 0 || ply >= maxPly {
-		return s.quiesce(game, ply, alpha, beta)
+		return s.quiesce(game, ply, 0, alpha, beta)
 	}
 
 	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], false)
@@ -817,13 +856,19 @@ func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) in
 // quiesce keeps searching captures and promotions past the depth limit until the position is quiet,
 // so the evaluation is never taken in the middle of an exchange (horizon effect).
 // When in check every evasion is searched instead, so mates at the horizon are still seen.
-func (s *searcher) quiesce(game *Game, ply int, alpha, beta int) int {
+// Only for the first [checkEvasionDepth] plies of [qdepth]: past that, captures that give check would keep
+// alternating with evasions, and the tree grows exponentially in positions with many pieces en prise.
+func (s *searcher) quiesce(game *Game, ply, qdepth int, alpha, beta int) int {
+	if !s.visit() {
+		return 0
+	}
+
 	if ply >= maxPly {
 		return evaluate(game)
 	}
 
 	var color PieceColor = game.color
-	var inCheck bool = game.inCheck(color)
+	var inCheck bool = qdepth < checkEvasionDepth && game.inCheck(color)
 	var standPat int = -infinity
 
 	if !inCheck { //stand pat: the side to move is not forced to capture
@@ -856,7 +901,7 @@ func (s *searcher) quiesce(game *Game, ply int, alpha, beta int) int {
 		}
 		legal++
 
-		var score int = -s.quiesce(&next, ply+1, -beta, -alpha)
+		var score int = -s.quiesce(&next, ply+1, qdepth+1, -beta, -alpha)
 		if score > alpha {
 			alpha = score
 			if alpha >= beta {
