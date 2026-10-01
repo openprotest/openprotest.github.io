@@ -458,6 +458,8 @@ class Chess extends Window {
 
         piece.setAttribute("p", `${position.x}${position.y}`);
 
+        if (this.isFlipped) piece.style.transform = "rotate(180deg)";
+
         piece.onmousedown = event => this.Piece_mousedown(event, false);
         piece.ontouchstart = event => this.Piece_mousedown(event, true);
 
@@ -1134,8 +1136,17 @@ class Chess extends Window {
         }
 
         if (this.selected) {
-            let x = isTouch ? this.selectedPosition.x + event.touches[0].clientX - this.x0 : this.selectedPosition.x + event.x - this.x0;
-            let y = isTouch ? this.selectedPosition.y + event.touches[0].clientY - this.board.getBoundingClientRect().height / 8 - this.y0 : this.selectedPosition.y + event.y - this.y0;
+            let dx = isTouch ? event.touches[0].clientX - this.x0 : event.x - this.x0;
+            let dy = isTouch ? event.touches[0].clientY - this.board.getBoundingClientRect().height / 8 - this.y0 : event.y - this.y0;
+
+            //the board is rotated by 180deg, so screen movement is inverted in board coordinates
+            if (this.isFlipped) {
+                dx = -dx;
+                dy = -dy;
+            }
+
+            let x = this.selectedPosition.x + dx;
+            let y = this.selectedPosition.y + dy;
 
             x = Math.max(x, -this.board.getBoundingClientRect().width / 16);
             x = Math.min(x, this.board.getBoundingClientRect().width - this.board.getBoundingClientRect().height / 16);
@@ -1149,8 +1160,8 @@ class Chess extends Window {
 
     Board_mouseup(event, isTouch) {
         if (this.selected) {
-            let x = Math.min(Math.max(parseFloat(event.srcElement.style.left), 0), this.board.getBoundingClientRect().width);
-            let y = Math.min(Math.max(parseFloat(event.srcElement.style.top), 0), this.board.getBoundingClientRect().height);
+            let x = Math.min(Math.max(parseFloat(this.selected.style.left), 0), this.board.getBoundingClientRect().width);
+            let y = Math.min(Math.max(parseFloat(this.selected.style.top), 0), this.board.getBoundingClientRect().height);
 
             let file1 = Math.round(x * 8 / this.board.getBoundingClientRect().width);
             let rank1 = Math.round(y * 8 / this.board.getBoundingClientRect().height);
