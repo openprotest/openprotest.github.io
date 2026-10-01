@@ -71,11 +71,136 @@ class Chess extends Window {
         return Chess.pieceMaps[name];
     }
 
+    static SOUNDS = {
+        move: { volume:0.5, lowpass:1000, hits: [
+            { at:0, noise:{ gain:4.29, freq:470, q:1.2, decay:0.00262 }, partials:[[469,0.0706,0.00829], [932,0.21,0.00469], [662,0.0302,0.00736], [1170,0.171,0.00224], [1320,0.0793,0.00658], [200,0.0494,0.0055]] }
+        ]},
+        capture: { volume:0.5, lowpass:1200, hits: [ //a light touch, then the hit
+            { at:0, noise:{ gain:0.711, freq:134, q:1, decay:0.000395 }, partials:[[586,0.0224,0.00469], [1230,0.0206,0.00641]] },
+            { at:0.0065, noise:{ gain:3.87, freq:487, q:0.9, decay:0.000943 }, partials:[[1470,0.0608,0.00109], [1240,0.199,0.00414], [938,0.0553,0.00061], [1700,0.102,0.00542], [627,0.106,0.00569], [250,0.0553,0.00159], [1990,0.0517,0.00853]] },
+            { at:0.019, noise:{ gain:0.631, freq:274, q:1, decay:0.00263 } }
+        ]},
+        check: { hits: [
+            { at:0, noise:{ gain:0.0434, freq:1950, q:0.5, decay:0.0117 } },
+            { at:0.0095, noise:{ gain:0.303, freq:3280, q:0.5, decay:0.00586 }, partials:[[961,0.069,0.00152], [1050,0.127,0.005], [668,0.156,0.00694], [873,0.129,0.00559], [1470,0.199,0.00438], [500,0.0203,0.00411]] },
+            { at:0.0225, noise:{ gain:0.758, freq:237, q:1, decay:0.00152 } },
+            { at:0.0265, noise:{ gain:0.445, freq:3090, q:1, decay:0.000252 } }
+        ]},
+    };
+
+    static audioContext = null;
+    static noiseBuffer = null;
+    static periodicWaves = {};
+
+    static PlaySound(name) {
+        const sound = Chess.SOUNDS[name];
+        if (!sound) return;
+
+        try {
+            Chess.audioContext ??= new AudioContext();
+        }
+        catch {
+            return;
+        }
+
+        const ctx = Chess.audioContext;
+        if (ctx.state === "suspended") ctx.resume();
+        const now = ctx.currentTime + 0.005;
+
+        if (!Chess.noiseBuffer) {
+            //seeded and at a fixed rate: the clicks are a few samples long and were tuned on this exact noise
+            Chess.noiseBuffer = ctx.createBuffer(1, 9600, 48000);
+            const data = Chess.noiseBuffer.getChannelData(0);
+            let seed = 1;
+            for (let i = 0; i < data.length; i++) {
+                seed = seed * 16807 % 2147483647;
+                data[i] = seed / 1073741823.5 - 1;
+            }
+        }
+
+        let output = ctx.destination;
+        if (sound.lowpass) {
+            const filter = ctx.createBiquadFilter();
+            filter.type = "lowpass";
+            filter.frequency.value = sound.lowpass;
+            filter.connect(output);
+            output = filter;
+        }
+        if (sound.volume !== undefined) {
+            const volume = ctx.createGain();
+            volume.gain.value = sound.volume;
+            volume.connect(output);
+            output = volume;
+        }
+
+        //plays [source] through [node] at [gain], decaying exponentially by [decay]
+        const strike = (source, node, at, gain, decay, attack)=> {
+            const envelope = ctx.createGain();
+            envelope.gain.setValueAtTime(0, at);
+            envelope.gain.linearRampToValueAtTime(gain, at + attack);
+            envelope.gain.setTargetAtTime(0, at + attack, decay);
+            node.connect(envelope);
+            envelope.connect(output);
+            source.start(at);
+            source.stop(at + attack + decay * 8);
+        };
+
+        for (const hit of sound.hits ?? []) {
+            const at = now + hit.at;
+
+            if (hit.noise) {
+                const source = ctx.createBufferSource();
+                source.buffer = Chess.noiseBuffer;
+                const filter = ctx.createBiquadFilter();
+                filter.type = "bandpass";
+                filter.frequency.value = hit.noise.freq;
+                filter.Q.value = hit.noise.q;
+                source.connect(filter);
+                strike(source, filter, at, hit.noise.gain, hit.noise.decay, 0.0005);
+            }
+
+            for (const [freq, gain, decay] of hit.partials ?? []) {
+                const osc = ctx.createOscillator();
+                osc.frequency.value = freq;
+                strike(osc, osc, at, gain, decay, 0.001);
+            }
+        }
+
+        if (sound.buzz) {
+            const buzz = sound.buzz;
+
+            if (!Chess.periodicWaves[name]) {
+                const anchors = buzz.harmonics;
+                const count = anchors[anchors.length - 1][0];
+                const real = new Float32Array(count + 1), imag = new Float32Array(count + 1);
+                for (let k = 1; k <= count; k++) {
+                    const j = anchors.findIndex(o=> o[0] >= k);
+                    const [k1, v1] = anchors[j], [k0, v0] = anchors[Math.max(0, j - 1)];
+                    real[k] = k1 === k0 ? v1 : v0 + (v1 - v0) * (k - k0) / (k1 - k0); //cosine phase, a pulse like a buzzer
+                }
+                Chess.periodicWaves[name] = ctx.createPeriodicWave(real, imag, { disableNormalization: true });
+            }
+
+            const osc = ctx.createOscillator();
+            osc.frequency.value = buzz.freq;
+            osc.setPeriodicWave(Chess.periodicWaves[name]);
+
+            const envelope = ctx.createGain();
+            envelope.gain.setValueAtTime(0, now);
+            envelope.gain.linearRampToValueAtTime(buzz.gain, now + buzz.attack);
+            envelope.gain.setValueAtTime(buzz.gain, now + buzz.attack + buzz.hold);
+            envelope.gain.linearRampToValueAtTime(0, now + buzz.attack + buzz.hold + buzz.release);
+
+            osc.connect(envelope);
+            envelope.connect(output);
+            osc.start(now);
+            osc.stop(now + buzz.attack + buzz.hold + buzz.release + 0.01);
+        }
+    }
+
     constructor(args) {
         super([64,64,64]);
 
-        //game to continue from, only given when restoring the previous session. otherwise a new game
-        //{ history:[{fen, san}] }, or a single fen from older sessions
         this.params = args ?? null;
 
         this.AddCssDependencies("chess/chess.css");
@@ -83,13 +208,6 @@ class Chess extends Window {
         this.SetTitle("Chess");
         this.SetIcon("chess/king.svg");
         this.content.style.overflow = "hidden";
-
-        this.sounds = {
-            move    : new Audio("chess/move.webm"),
-            capture : new Audio("chess/capture.webm"),
-            check   : new Audio("chess/check.webm"),
-            illegal : new Audio("chess/illegal.webm")
-        };
 
         this.board = document.createElement("div");
         this.board.className = "chess-board";
@@ -201,8 +319,6 @@ class Chess extends Window {
                this.game.activecolor === "b" && this.playerB === "ai";
     }
 
-    //Asks the engine for a move, if it is the ai's turn. The engine gets the positions so far, to avoid repeating itself.
-    //While an earlier position is shown, the game waits. ShowMove asks again on returning to the last one.
     PlayAiMove(delay = 500) {
         if (!this.IsAiTurn()) return;
 
@@ -687,10 +803,6 @@ class Chess extends Window {
             const captured = findPiece(p1.x, p1.y);
             if (captured) this.board.removeChild(captured);
             isCapture = true;
-            this.sounds.capture.play();
-        }
-        else {
-            this.sounds.move.play();
         }
 
         //fifty-move rule counter, reset by pawn moves and captures
@@ -714,10 +826,16 @@ class Chess extends Window {
         const isPromotion = this.game.placement[p1.x][p1.y] === "P" && p1.y === 0 ||
                             this.game.placement[p1.x][p1.y] === "p" && p1.y === 7;
 
+        let isSoundPlayed = false;
+
         //once the position is final, the move goes to the history
         const record = ()=> {
             if (isPromotion) san += "=" + this.game.placement[p1.x][p1.y].toUpperCase();
-            san += this.GetCheckNotation();
+            const check = this.GetCheckNotation();
+            san += check;
+
+            if (check) Chess.PlaySound("check");
+            else if (!isSoundPlayed) Chess.PlaySound(isCapture ? "capture" : "move");
 
             this.positions.push(this.PositionKey());
             this.history.push({ fen: this.GetCurrentFen(), san: san });
@@ -738,8 +856,10 @@ class Chess extends Window {
                 this.SetPieceType(element, "q");
             }
             else {
-                //the position is only final once a piece is picked
+                //the position is only final once a piece is picked. the piece has landed, so it sounds now
                 this.isPromotionPending = true;
+                Chess.PlaySound(isCapture ? "capture" : "move");
+                isSoundPlayed = true;
                 const callback = ()=>{
                     this.isPromotionPending = false;
                     record();
@@ -1369,7 +1489,7 @@ class Chess extends Window {
             else { //undo
                 this.selected.style.left = this.file0 * 12.5 + "%";
                 this.selected.style.top = this.rank0 * 12.5 + "%";
-                //this.sounds.illegal.play();
+                //Chess.PlaySound("illegal");
             }
             
             if (this.GetPieceColor({x:this.file0, y:this.rank0}, this.game) === this.game.activecolor)

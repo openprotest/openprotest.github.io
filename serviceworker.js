@@ -62,7 +62,6 @@ const FILES_LIST = [
 	"/chess/bishop.svg",
 	"/chess/knight.svg",
 	"/chess/pawn.svg",
-	"/chess/move.ogg",
 
 	"/mono/chat-light.svg",
 	"/mono/chat.svg",
