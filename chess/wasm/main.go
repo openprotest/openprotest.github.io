@@ -11,7 +11,7 @@ func main() {
 	<-c
 }
 
-func calc(this js.Value, i []js.Value) (result interface{}) {
+func calc(this js.Value, i []js.Value) (result any) {
 	//a panic would exit the go program, and every later call would fail. answer "" (no move) instead
 	defer func() {
 		if r := recover(); r != nil {
@@ -34,7 +34,7 @@ func calc(this js.Value, i []js.Value) (result interface{}) {
 	//positions of the game so far, comma separated (see positionKey)
 	var history map[string]bool = map[string]bool{}
 	if len(i) > 2 && i[2].Type() == js.TypeString {
-		for _, key := range strings.Split(i[2].String(), ",") {
+		for key := range strings.SplitSeq(i[2].String(), ",") {
 			history[key] = true
 		}
 	}

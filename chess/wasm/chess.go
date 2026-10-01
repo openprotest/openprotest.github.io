@@ -176,7 +176,7 @@ func init() {
 	kingOffsets := [8][2]int{{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}}
 	directions := [8][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}}
 
-	for sq := 0; sq < 64; sq++ {
+	for sq := range 64 {
 		x, y := sq%8, sq/8
 
 		for _, o := range knightOffsets {
@@ -342,10 +342,10 @@ func moveToString(move Move) string {
 
 func printPosition(game *Game) {
 	const letters = " pnbrqk"
-	for y := 0; y < 8; y++ {
+	for y := range 8 {
 		print(8 - y)
 		print("  ")
-		for x := 0; x < 8; x++ {
+		for x := range 8 {
 			var p byte = game.board[y*8+x]
 			var l byte = letters[pieceType(p)]
 			if p != 0 && pieceColor(p) == White {
@@ -381,7 +381,7 @@ func (game *Game) isAttacked(sq int8, by PieceColor) bool {
 	}
 
 	var queen byte = makePiece(Queen, by)
-	for d := 0; d < 8; d++ {
+	for d := range 8 {
 		var slider byte = makePiece(Rook, by)
 		if d >= 4 {
 			slider = makePiece(Bishop, by)
@@ -412,7 +412,7 @@ func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
 	var enemy PieceColor = flipColor(color)
 	var quiet bool = !capturesOnly
 
-	for from := int8(0); from < 64; from++ {
+	for from := range int8(64) {
 		var p byte = b[from]
 		if p == 0 || pieceColor(p) != color {
 			continue
@@ -651,12 +651,12 @@ func mopUp(winner, loser int8) int {
 func positionKey(game *Game) string {
 	const letters = " pnbrqk"
 	var sb strings.Builder
-	for y := 0; y < 8; y++ {
+	for y := range 8 {
 		if y > 0 {
 			sb.WriteByte('/')
 		}
 		var blank byte = 0
-		for x := 0; x < 8; x++ {
+		for x := range 8 {
 			var p byte = game.board[y*8+x]
 			if p == 0 {
 				blank++
