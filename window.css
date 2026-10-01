@@ -78,7 +78,7 @@
 	z-index: 5;
 	bottom: 0;
 	right: 0;
-	cursor: nw-resize;
+	cursor: nwse-resize;
 
 	border-bottom: 16px solid light-dark(rgb(64,64,64), rgb(128,128,128));
 	border-left: 16px solid transparent;
