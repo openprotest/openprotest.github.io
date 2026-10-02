@@ -122,6 +122,8 @@ const FILES_LIST = [
 	"/mono/maclookup-light.svg",
 	"/mono/maclookup.svg",
 	"/mono/dns-light.svg",
+	"/mono/download-light.svg",
+	"/mono/download.svg",
 	"/mono/dns.svg",
 	"/mono/update-light.svg",
 	"/mono/update.svg",

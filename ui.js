@@ -366,6 +366,7 @@ const MENU = {
 		{ t:"Session",        i:"mono/hourglass-light.svg",   g:"manage", h:true,  f:params=> new Personalize("session") },
 
 		{ t:"About",          i:"mono/logo-light.svg",        g:"manage", h:false, f:params=> new About("about") },
+		{ t:"Get Pro-test",   i:"mono/download-light.svg",    g:"manage", h:false, f:params=> window.open("https://github.com/openprotest/protest/releases/latest", "_blank", "noopener"), k:"download full project github install server" },
 		{ t:"Legal",          i:"mono/law-light.svg",         g:"manage", h:true,  f:params=> new About("legal") },
 	],
 

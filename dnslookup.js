@@ -294,7 +294,6 @@ class DnsLookup extends Console {
 		}
 	}
 
-	//An ip address is looked up in reverse: 8.8.8.8 is queried as a PTR of 8.8.8.8.in-addr.arpa
 	static ReverseName(address) {
 		if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address))
 			return address.split(".").reverse().join(".") + ".in-addr.arpa";
