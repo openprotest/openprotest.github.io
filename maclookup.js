@@ -4,7 +4,7 @@ class MacLookup extends Console {
 
 		this.params = params ?? { entries: [] };
 
-		this.AddCssDependencies("tools.css");
+		Window.AddCssDependencies("tools.css");
 
 		this.hashtable = {}; //contains all elements
 

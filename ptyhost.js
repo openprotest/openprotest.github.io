@@ -172,7 +172,7 @@ class PtyHost extends Window {
 			scrollback: PtyHost.DEFAULT_SCROLLBACK
 		}, args);
 
-		this.AddCssDependencies("ptyhost.css");
+		Window.AddCssDependencies("ptyhost.css");
 
 		this.InitializeComponents();
 		this.InitializeTerminalState();

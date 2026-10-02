@@ -138,7 +138,7 @@ class Terminal extends Window {
 			smoothCursor: false
 		}, args);
 
-		this.AddCssDependencies("terminal.css");
+		Window.AddCssDependencies("terminal.css");
 
 		this.InitializeComponents();
 		this.InitializeTerminalState();

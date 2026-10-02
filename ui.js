@@ -345,19 +345,19 @@ const UI = {
 
 const MENU = {
 	items: [
-		{ t:"Locate IP",          i:"mono/locate-light.svg",        g:"utilities", h:false, f:params=> new LocateIp(params),     k:"location" },
-		{ t:"MAC lookup",         i:"mono/maclookup-light.svg",     g:"utilities", h:false, f:params=> new MacLookup(params),    k:"vendor resolver" },
+		{ t:"Locate IP",          i:"mono/locate-light.svg",        g:"utilities", h:false,  f:params=> new LocateIp(params),     k:"location" },
+		{ t:"MAC lookup",         i:"mono/maclookup-light.svg",     g:"utilities", h:false,  f:params=> new MacLookup(params),    k:"vendor resolver" },
 		{ t:"Serial console",     i:"mono/serialconsole-light.svg", g:"utilities", h:false,  f:params=> new Rs232(),  k:"recorder shot" },
 		{ t:"Network calculator", i:"mono/netcalc-light.svg",       g:"utilities", h:false,  f:params=> new NetCalc(params),   k:"subnet" },
-		{ t:"Password generator", i:"mono/passgen-light.svg",       g:"utilities", h:false, f:params=> new PassGen(params),  k:"code" },
+		{ t:"QR generator",       i:"mono/qrcode-light.svg",        g:"utilities", h:false,  f:args=> new QrGenerator(args), k:"qr code barcode generator" },
+		{ t:"Password generator", i:"mono/passgen-light.svg",       g:"utilities", h:false,  f:params=> new PassGen(params),  k:"code" },
 		{ t:"Screen capture",     i:"mono/screenrecord-light.svg",  g:"utilities", h:false,  f:params=> new ScreenCapture(),  k:"recorder shot" },
 		{ t:"Camera tester",      i:"mono/webcam-light.svg",        g:"utilities", h:false,  f:params=> new CameraTester(),   k:"webcam" },
 		{ t:"Microphone tester",  i:"mono/mic-light.svg",           g:"utilities", h:false,  f:params=> new MicTester(),      k:"audio input" },
 		{ t:"Keyboard tester",    i:"mono/keyboard-light.svg",      g:"utilities", h:false,  f:params=> new KeyboardTester(), k:"keys" },
 		{ t:"Gamepad tester",     i:"mono/gamepad-light.svg",       g:"utilities", h:false,  f:params=> new KeyboardTester("gamepad"), k:"joystick" },
-		{ t:"Encoder",            i:"mono/encoder-light.svg",       g:"utilities", h:true,  f:params=> new Encoder(params),   k:"binary hex base64 url html decode" },
-		
-		{ t:"Chess",              i:"chess/king-light.svg",              g:"game",      h:false,  f:params=> new Chess()},
+		{ t:"Encoder",            i:"mono/encoder-light.svg",       g:"utilities", h:true,   f:params=> new Encoder(params),   k:"binary hex base64 url html decode" },
+		{ t:"Chess",              i:"chess/king-light.svg",         g:"game",      h:false,  f:params=> new Chess()},
 
 		{ t:"Personalize",    i:"mono/personalize-light.svg", g:"manage", h:true, f:params=> new Personalize() },
 		{ t:"Appearance",     i:"mono/tv-light.svg",          g:"manage", h:true,  f:params=> new Personalize("appearance") },

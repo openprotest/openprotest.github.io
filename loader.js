@@ -19,6 +19,7 @@ const LOADER = {
 		"tabs.js",
 		"console.js",
 		"ipbox.js",
+		"fewbox.js",
 		"terminal.js",
 		"wasm_exec.js",
 		"ptyhost.js"
@@ -31,6 +32,7 @@ const LOADER = {
 		"maclookup.js",
 		"passwordgen.js",
 		"encoder.js",
+		"qrgenerator.js",
 		"netcalc.js",
 		"keyboardtester.js",
 		"mictester.js",
@@ -162,6 +164,7 @@ const LOADER = {
 		case "MacLookup"      : return new MacLookup(command.params);
 		case "PassGen"        : return new PassGen(command.params);
 		case "Encoder"        : return new Encoder(command.params);
+		case "QrGenerator"    : return new QrGenerator(command.params);
 		case "NetCalc"        : return new NetCalc(command.params);
 		case "KeyboardTester" : return new KeyboardTester(command.params);
 		case "MicTester"      : return new MicTester(command.params);

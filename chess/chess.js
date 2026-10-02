@@ -203,7 +203,7 @@ class Chess extends Window {
 
         this.params = args ?? null;
 
-        this.AddCssDependencies("chess/chess.css");
+        Window.AddCssDependencies("chess/chess.css");
 
         this.SetTitle("Chess");
         this.SetIcon("chess/king.svg");

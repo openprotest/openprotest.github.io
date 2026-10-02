@@ -2,7 +2,7 @@ class Tabs extends Window {
 	constructor(themeColor = [64,64,64]) {
 		super();
 
-		this.AddCssDependencies("tabs.css");
+		Window.AddCssDependencies("tabs.css");
 
 		this.tabsList = [];
 		this.content.classList.add("tabs-content");

@@ -1,0 +1,74 @@
+.few-box {
+	position: relative;
+	overflow: hidden;
+	text-align: center;
+	white-space: nowrap;
+	color: var(--clr-dark);
+	background-color: var(--clr-control);
+	border: 1px solid #777;
+	border-radius: 4px;
+	max-width: 400px;
+	max-height: 28px;
+	margin: 4px;
+}
+
+.few-box:focus-within {
+	animation: focus-outline .3s ease-in forwards;
+}
+
+.few-box > select {
+	animation: none;
+	margin: 0;
+}
+
+.few-box-items {
+	position: relative;
+}
+
+.few-box-items > div:not(.few-box-highlight) {
+	position: relative;
+	display: inline-block;
+	font-weight: 600;
+	border-radius: 4px;
+	margin: 2px;
+	padding: 2px 8px;
+}
+
+.few-box-items > div:not(.few-box-highlight):hover {
+	background-color: color-mix(in srgb, var(--clr-select) 25%, transparent);
+	box-shadow: var(--clr-select) 0 0 0 1px inset;
+}
+
+.few-box-items > .few-box-highlight {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 0;
+	height: 0;
+	border-radius: 4px;
+	background-color: var(--clr-select);
+	opacity: 0;
+	pointer-events: none;
+	transition: .2s;
+}
+
+.few-box-items > .few-box-highlight.visible {
+	opacity: 1;
+}
+
+.few-box-select {
+	display: none;
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	padding: 4px 8px;
+	border: none;
+}
+
+.few-box.collapsed .few-box-items {
+	visibility: hidden;
+}
+
+.few-box.collapsed .few-box-select {
+	display: block;
+}

@@ -244,6 +244,8 @@ document.body.onbeforeunload = ()=> {
 taskbar.oncontextmenu = event=> false;
 
 class Window {
+	static cssDependencies = [];
+
 	constructor(themeColor = [64, 64, 64]) {
 		this.isMaximized = false;
 		this.isMinimized = false;
@@ -254,7 +256,6 @@ class Window {
 		this.defaultElement = null;
 		this.params = {};
 		this.messagesQueue = [];
-		this.cssDependencies = [];
 		this.toolbar = null;
 
 		WIN.startX += 2;
@@ -1151,7 +1152,7 @@ class Window {
 		return newLabel;
 	}
 
-	AddCssDependencies(filename) {
+	static AddCssDependencies(filename) {
 		if (document.head.querySelectorAll(`link[href$='${filename}']`).length === 0) {
 			const cssLink = document.createElement("link");
 			cssLink.rel = "stylesheet";
@@ -1159,7 +1160,7 @@ class Window {
 			document.head.appendChild(cssLink);
 		}
 
-		if (!this.cssDependencies.includes(filename))
-			this.cssDependencies.push(filename);
+		if (!Window.cssDependencies.includes(filename))
+			Window.cssDependencies.push(filename);
 	}
 }
