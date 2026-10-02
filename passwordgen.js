@@ -1,4 +1,16 @@
+"use strict";
 class PassGen extends Window {
+	static GUESSES_PER_SECOND = 3e12; //a fast, unsalted hash (e.g. NTLM) on an 8-GPU rig
+	static SUBSTITUTION_BITS = -(0.6 * Math.log2(0.6) + 0.4 * Math.log2(0.4)); //a 60/40 coin flip, ~0.97 bits
+
+	static COMMON = [
+		"123456789", "12345678", "1234567", "123456", "12345", "1234", "123",
+		"987654321", "87654321", "7654321", "654321", "54321", "4321", "321",
+		"666", "abc", "qwerty", "!@#$%^&*", "!\"#$%^&*", "pass", "pa55", "word", "w0rd",
+		"admin", "root", "public", "welcome", "login", "master", "hello", "letmein",
+		"sunshine", "love", "princess", "monkey", "donald", "football", "whatever", "asshole", "dragon"
+	];
+
 	constructor() {
 		super();
 
@@ -9,39 +21,36 @@ class PassGen extends Window {
 		this.content.style.overflowY = "auto";
 		this.content.style.textAlign = "center";
 
-		this.txtPassword = document.createElement("input");
-		this.txtPassword.type = "text";
-		this.txtPassword.maxLength = "64";
-		this.txtPassword.style.fontSize = "larger";
-		this.txtPassword.style.width = "60%";
-		this.txtPassword.style.maxWidth = "720px";
-		this.txtPassword.style.margin = "2px calc(20% - 32px)";
-		this.txtPassword.style.fontFamily = "monospace";
-		this.content.appendChild(this.txtPassword);
+		this.passwordInput = document.createElement("input");
+		this.passwordInput.type = "text";
+		this.passwordInput.maxLength = "64";
+		this.passwordInput.style.fontSize = "larger";
+		this.passwordInput.style.width = "60%";
+		this.passwordInput.style.maxWidth = "720px";
+		this.passwordInput.style.margin = "2px calc(20% - 32px)";
+		this.passwordInput.style.fontFamily = "monospace";
+		this.content.appendChild(this.passwordInput);
 
-		this.divStrength = document.createElement("div");
-		this.divStrength.style.marginTop = "4px";
-		this.divStrength.style.marginTop = "4px";
-		this.divStrength.style.marginTop = "4px";
-		this.content.appendChild(this.divStrength);
+		this.strengthBox = document.createElement("div");
+		this.strengthBox.style.marginTop = "4px";
+		this.content.appendChild(this.strengthBox);
 
-		this.divBar = document.createElement("div");
-		this.divBar.className = "passwors-strength-bar";
-		this.divBar.style.display = "inline-block";
-		this.divBar.style.width = "40px";
-		this.divBar.style.height = "12px";
-		this.divBar.style.transition = "box-shadow .2s";
-		this.divBar.style.border = "1px solid rgb(127,127,127)";
-		this.divBar.style.borderRadius = "2px";
-		this.divStrength.appendChild(this.divBar);
+		this.strengthBar = document.createElement("div");
+		this.strengthBar.style.display = "inline-block";
+		this.strengthBar.style.width = "40px";
+		this.strengthBar.style.height = "12px";
+		this.strengthBar.style.transition = "box-shadow .2s";
+		this.strengthBar.style.border = "1px solid rgb(127,127,127)";
+		this.strengthBar.style.borderRadius = "2px";
+		this.strengthBox.appendChild(this.strengthBar);
 
-		this.lblComment = document.createElement("div");
-		this.lblComment.style.display = "inline-block";
-		this.lblComment.style.minWidth = "100px";
-		this.lblComment.style.textAlign = "left";
-		this.lblComment.style.marginLeft = "8px";
-		this.lblComment.style.marginTop = "0px";
-		this.divStrength.appendChild(this.lblComment);
+		this.commentLabel = document.createElement("div");
+		this.commentLabel.style.display = "inline-block";
+		this.commentLabel.style.minWidth = "100px";
+		this.commentLabel.style.textAlign = "left";
+		this.commentLabel.style.marginLeft = "8px";
+		this.commentLabel.style.marginTop = "0px";
+		this.strengthBox.appendChild(this.commentLabel);
 
 		const grid = document.createElement("div");
 		grid.style.display = "grid";
@@ -50,7 +59,6 @@ class PassGen extends Window {
 		grid.style.padding = "40px";
 		grid.style.backgroundColor = "var(--clr-pane)";
 		grid.style.color = "var(--clr-dark)";
-		grid.style.fontWeight = "600";
 		grid.style.borderRadius = "4px";
 		grid.style.gridTemplateColumns = "210px 110px 180px";
 		grid.style.gridTemplateRows = "40px repeat(5, 32px)";
@@ -62,239 +70,229 @@ class PassGen extends Window {
 		this.cmbOptions.style.gridArea = "1 / 1 / auto / 3";
 		grid.appendChild(this.cmbOptions);
 
-		let optPin = document.createElement("option");
-		optPin.value = "pin";
-		optPin.text = "Pin";
-		this.cmbOptions.appendChild(optPin);
+		let pinOption = document.createElement("option");
+		pinOption.value = "pin";
+		pinOption.text = "Pin";
+		this.cmbOptions.appendChild(pinOption);
 
-		let optRandom = document.createElement("option");
-		optRandom.value = "rnd";
-		optRandom.text = "Random";
-		this.cmbOptions.appendChild(optRandom);
+		let randomOption = document.createElement("option");
+		randomOption.value = "rnd";
+		randomOption.text = "Random";
+		this.cmbOptions.appendChild(randomOption);
 
 		this.cmbOptions.value = "rnd";
 
-		let lblLength = document.createElement("div");
-		lblLength.textContent = "Length:";
-		lblLength.style.textDecoration = "underline";
-		lblLength.style.width = "100%";
-		lblLength.style.marginBottom = "4px";
-		lblLength.style.textAlign = "left";
-		lblLength.style.gridArea = "2 / 1";
-		grid.appendChild(lblLength);
+		let lengthLabel = document.createElement("div");
+		lengthLabel.textContent = "Length:";
+		lengthLabel.style.width = "100%";
+		lengthLabel.style.marginBottom = "4px";
+		lengthLabel.style.textAlign = "left";
+		lengthLabel.style.gridArea = "2 / 1";
+		grid.appendChild(lengthLabel);
 
-		this.rngLength = document.createElement("input");
-		this.rngLength.type = "range";
-		this.rngLength.min = "6";
-		this.rngLength.max = this.txtPassword.maxLength;
-		this.rngLength.value = "16";
-		this.rngLength.style.width = "200px";
-		this.rngLength.style.float = "left";
-		this.rngLength.style.gridArea = "3 / 1";
-		grid.appendChild(this.rngLength);
+		this.lengthRange = document.createElement("input");
+		this.lengthRange.type = "range";
+		this.lengthRange.min = "6";
+		this.lengthRange.max = this.passwordInput.maxLength;
+		this.lengthRange.value = "16";
+		this.lengthRange.style.width = "200px";
+		this.lengthRange.style.float = "left";
+		this.lengthRange.style.gridArea = "3 / 1";
+		grid.appendChild(this.lengthRange);
 
-		this.txtLength = document.createElement("input");
-		this.txtLength.type = "number";
-		this.txtLength.min = this.rngLength.min;
-		this.txtLength.max = this.txtPassword.maxLength;
-		this.txtLength.value = this.rngLength.value;
-		this.txtLength.style.width = "48px";
-		this.txtLength.style.gridArea = "3 / 2";
-		grid.appendChild(this.txtLength);
+		this.lengthInput = document.createElement("input");
+		this.lengthInput.type = "number";
+		this.lengthInput.min = this.lengthRange.min;
+		this.lengthInput.max = this.passwordInput.maxLength;
+		this.lengthInput.value = this.lengthRange.value;
+		this.lengthInput.style.width = "48px";
+		this.lengthInput.style.gridArea = "3 / 2";
+		grid.appendChild(this.lengthInput);
 
-		const divLowercase = document.createElement("div");
-		divLowercase.style.textAlign = "left";
-		divLowercase.style.gridArea = "2 / 3";
-		grid.appendChild(divLowercase);
+		const lowercaseBox = document.createElement("div");
+		lowercaseBox.style.textAlign = "left";
+		lowercaseBox.style.gridArea = "2 / 3";
+		grid.appendChild(lowercaseBox);
+		this.lowercaseToggle = this.CreateToggle("Lowercase", true, lowercaseBox);
 
-		this.chkLowercase = document.createElement("input");
-		this.chkLowercase.type = "checkbox";
-		this.chkLowercase.checked = true;
-		divLowercase.appendChild(this.chkLowercase);
-		this.AddCheckBoxLabel(divLowercase, this.chkLowercase, "Lowercase");
+		const uppercaseBox = document.createElement("div");
+		uppercaseBox.style.textAlign = "left";
+		uppercaseBox.style.gridArea = "3 / 3";
+		grid.appendChild(uppercaseBox);
+		this.uppercaseToggle = this.CreateToggle("Uppercase", true, uppercaseBox);
 
+		const numbersBox = document.createElement("div");
+		numbersBox.style.textAlign = "left";
+		numbersBox.style.gridArea = "4 / 3";
+		grid.appendChild(numbersBox);
+		this.numbersToggle = this.CreateToggle("Numbers", true, numbersBox);
 
-		const divUppercase = document.createElement("div");
-		divUppercase.style.textAlign = "left";
-		divUppercase.style.gridArea = "3 / 3";
-		grid.appendChild(divUppercase);
+		const symbolsBox = document.createElement("div");
+		symbolsBox.style.textAlign = "left";
+		symbolsBox.style.gridArea = "5 / 3";
+		grid.appendChild(symbolsBox);
+		this.symbolsToggle = this.CreateToggle("Symbols", true, symbolsBox);
 
-		this.chkUppercase = document.createElement("input");
-		this.chkUppercase.type = "checkbox";
-		this.chkUppercase.checked = false;
-		divUppercase.appendChild(this.chkUppercase);
-		this.AddCheckBoxLabel(divUppercase, this.chkUppercase, "Uppercase");
+		const similarBox = document.createElement("div");
+		similarBox.style.textAlign = "left";
+		similarBox.style.gridArea = "6 / 3";
+		grid.appendChild(similarBox);
+		this.similarToggle = this.CreateToggle("Similar", true, similarBox);
 
+		const entropyLabel = document.createElement("div");
+		entropyLabel.textContent = "Entropy (bits):";
+		entropyLabel.style.gridArea = "4 / 1";
+		entropyLabel.style.textAlign = "right";
+		entropyLabel.style.paddingRight = "4px";
+		entropyLabel.style.color = "#808080";
+		grid.appendChild(entropyLabel);
 
-		const divNumbers = document.createElement("div");
-		divNumbers.style.textAlign = "left";
-		divNumbers.style.gridArea = "4 / 3";
-		grid.appendChild(divNumbers);
+		this.entropyValueLabel = document.createElement("div");
+		this.entropyValueLabel.style.gridArea = "4 / 2";
+		this.entropyValueLabel.style.textAlign = "left";
+		this.entropyValueLabel.style.fontWeight = "normal";
+		this.entropyValueLabel.style.paddingLeft = "12px";
+		this.entropyValueLabel.style.color = "#808080";
+		grid.appendChild(this.entropyValueLabel);
 
-		this.chkNumbers = document.createElement("input");
-		this.chkNumbers.type = "checkbox";
-		this.chkNumbers.checked = true;
-		divNumbers.appendChild(this.chkNumbers);
-		this.AddCheckBoxLabel(divNumbers, this.chkNumbers, "Numbers");
-
-		const divSymbols = document.createElement("div");
-		divSymbols.style.textAlign = "left";
-		divSymbols.style.gridArea = "5 / 3";
-		grid.appendChild(divSymbols);
-
-		this.chkSymbols = document.createElement("input");
-		this.chkSymbols.type = "checkbox";
-		this.chkSymbols.checked = false;
-		divSymbols.appendChild(this.chkSymbols);
-		this.AddCheckBoxLabel(divSymbols, this.chkSymbols, "Symbols");
-
-		const divSimilar = document.createElement("div");
-		divSimilar.style.textAlign = "left";
-		divSimilar.style.gridArea = "6 / 3";
-		grid.appendChild(divSimilar);
-
-		this.chkSimilar = document.createElement("input");
-		this.chkSimilar.type = "checkbox";
-		this.chkSimilar.checked = false;
-		divSimilar.appendChild(this.chkSimilar);
-		this.AddCheckBoxLabel(divSimilar, this.chkSimilar, "Similar characters");
-
-		const lblEntropy = document.createElement("div");
-		lblEntropy.textContent = "Entropy (bits):";
-		lblEntropy.style.gridArea = "4 / 1";
-		lblEntropy.style.textAlign = "right";
-		lblEntropy.style.paddingRight = "4px";
-		lblEntropy.style.color = "#808080";
-		grid.appendChild(lblEntropy);
-
-		this.lblEntropyValue = document.createElement("div");
-		this.lblEntropyValue.style.gridArea = "4 / 2";
-		this.lblEntropyValue.style.textAlign = "left";
-		this.lblEntropyValue.style.fontWeight = "normal";
-		this.lblEntropyValue.style.paddingLeft = "12px";
-		this.lblEntropyValue.style.color = "#808080";
-		grid.appendChild(this.lblEntropyValue);
-
-		this.rngLength.oninput = ()=> {
-			this.txtLength.value = this.rngLength.value;
+		this.lengthRange.oninput = ()=> {
+			this.lengthInput.value = this.lengthRange.value;
 			this.Generate();
 		};
 
-		this.txtLength.oninput = ()=> {
-			this.rngLength.value = this.txtLength.value;
+		this.lengthInput.oninput = ()=> {
+			this.lengthRange.value = this.lengthInput.value;
 			this.Generate();
 		};
 
-		let divButtons = document.createElement("div");
-		divButtons.style.width = "100%";
-		divButtons.style.textAlign = "center";
-		divButtons.style.paddingTop = "32px";
-		divButtons.style.gridArea = "5 / 1 / 7 / 3";
-		grid.appendChild(divButtons);
+		let buttonsBox = document.createElement("div");
+		buttonsBox.style.display = "grid";
+		buttonsBox.style.gridTemplateColumns = "auto 100px 64px 64px auto";
+		buttonsBox.style.gridTemplateRows = "1fr";
+		buttonsBox.style.width = "100%";
+		buttonsBox.style.textAlign = "center";
+		buttonsBox.style.paddingTop = "32px";
+		buttonsBox.style.gridArea = "5 / 1 / 7 / 3";
+		grid.appendChild(buttonsBox);
 
-		const btnGenerate = document.createElement("input");
-		btnGenerate.type = "button";
-		btnGenerate.value = "Generate";
-		divButtons.appendChild(btnGenerate);
+		const generateButton = document.createElement("input");
+		generateButton.type = "button";
+		generateButton.value = "Generate";
+		generateButton.style.gridArea = "1 / 2";
+		buttonsBox.appendChild(generateButton);
 
-		const btnCopy = document.createElement("input");
-		btnCopy.type = "button";
-		btnCopy.value = "Copy";
-		divButtons.appendChild(btnCopy);
+		const copyButton = document.createElement("input");
+		copyButton.type = "button";
+		copyButton.value = "Copy";
+		copyButton.style.backgroundSize = "28px 28px";
+		copyButton.style.backgroundPosition = "50% 50%";
+		copyButton.style.backgroundRepeat = "no-repeat";
+		copyButton.style.minWidth = "56px";
+		copyButton.style.gridArea = "1 / 3";
+		buttonsBox.appendChild(copyButton);
 
-		btnGenerate.style.width = btnCopy.style.width = "96px";
-		btnGenerate.style.height = btnCopy.style.height = "40px";
-		btnGenerate.style.margin = btnCopy.style.margin = "2px";
-		btnGenerate.style.borderRadius = "4px 0 0 4px";
-		btnCopy.style.borderRadius = "0 4px 4px 0";
+		generateButton.style.height = copyButton.style.height = "40px";
+		generateButton.style.margin = copyButton.style.margin = "2px";
+		generateButton.style.borderRadius = "4px 0 0 4px";
+		copyButton.style.borderRadius = "0 4px 4px 0";
 
-		this.lblTtc = document.createElement("div");
-		this.lblTtc.style.color = "var(--clr-contrast)";
-		this.lblTtc.style.whiteSpace = "nowrap";
-		this.content.appendChild(this.lblTtc);
+		this.ttcLabel = document.createElement("div");
+		this.ttcLabel.title = "Average time to crack: a fast, unsalted hash on an 8-GPU rig, at 3 trillion guesses per second.";
+		this.ttcLabel.style.color = "var(--clr-contrast)";
+		this.ttcLabel.style.whiteSpace = "nowrap";
+		this.content.appendChild(this.ttcLabel);
 
 		this.cmbOptions.onchange = ()=> {
 			switch (this.cmbOptions.value) {
 			case "pin":
-				this.rngLength.min = 4;
-				this.rngLength.value = 4;
-				this.rngLength.max = 64;
-				this.chkNumbers.checked = true;
-				this.chkLowercase.checked = false;
-				this.chkUppercase.checked = false;
-				this.chkSymbols.checked = false;
-				this.chkSimilar.checked = false;
-				this.chkLowercase.disabled = true;
-				this.chkUppercase.disabled = true;
-				this.chkNumbers.disabled = true;
-				this.chkSymbols.disabled = true;
-				this.chkSimilar.disabled = true;
-				lblLength.textContent = "Length:";
+				this.lengthRange.min = 4;
+				this.lengthRange.value = 4;
+				this.lengthRange.max = 64;
+				this.numbersToggle.checkbox.checked = true;
+				this.lowercaseToggle.checkbox.checked = false;
+				this.uppercaseToggle.checkbox.checked = false;
+				this.symbolsToggle.checkbox.checked = false;
+				this.similarToggle.checkbox.checked = true;
+				this.lowercaseToggle.checkbox.disabled = true;
+				this.uppercaseToggle.checkbox.disabled = true;
+				this.numbersToggle.checkbox.disabled = true;
+				this.symbolsToggle.checkbox.disabled = true;
+				this.similarToggle.checkbox.disabled = true;
+				lengthLabel.textContent = "Length:";
 				break;
 
 			case "rnd":
-				this.rngLength.value = 16;
-				this.rngLength.min = 6;
-				this.rngLength.max = 64;
-				this.chkLowercase.checked = true;
-				this.chkUppercase.checked = false;
-				this.chkNumbers.checked = true;
-				this.chkSymbols.checked = false;
-				this.chkSimilar.checked = false;
-				this.chkLowercase.disabled = false;
-				this.chkUppercase.disabled = false;
-				this.chkNumbers.disabled = false;
-				this.chkSymbols.disabled = false;
-				this.chkSimilar.disabled = false;
-				lblLength.textContent = "Length:";
+				this.lengthRange.value = 16;
+				this.lengthRange.min = 6;
+				this.lengthRange.max = 64;
+				this.lowercaseToggle.checkbox.checked = true;
+				this.uppercaseToggle.checkbox.checked = true;
+				this.numbersToggle.checkbox.checked = true;
+				this.symbolsToggle.checkbox.checked = false;
+				this.similarToggle.checkbox.checked = false;
+				this.lowercaseToggle.checkbox.disabled = false;
+				this.uppercaseToggle.checkbox.disabled = false;
+				this.numbersToggle.checkbox.disabled = false;
+				this.symbolsToggle.checkbox.disabled = false;
+				this.similarToggle.checkbox.disabled = false;
+				lengthLabel.textContent = "Length:";
 				break;
 
 			case "mem":
-				this.rngLength.min = 2;
-				this.rngLength.value = 4;
-				this.rngLength.max = 32;
-				this.chkLowercase.checked = true;
-				this.chkUppercase.checked = false;
-				this.chkNumbers.checked = false;
-				this.chkSymbols.checked = false;
-				this.chkSimilar.checked = false;
-				this.chkLowercase.disabled = false;
-				this.chkUppercase.disabled = false;
-				this.chkNumbers.disabled = false;
-				this.chkSymbols.disabled = true;
-				this.chkSimilar.disabled = true;
-				lblLength.textContent = "Words:";
+				this.lengthRange.min = 2;
+				this.lengthRange.value = 4;
+				this.lengthRange.max = 32;
+				this.lowercaseToggle.checkbox.checked = true;
+				this.uppercaseToggle.checkbox.checked = false;
+				this.numbersToggle.checkbox.checked = false;
+				this.symbolsToggle.checkbox.checked = false;
+				this.similarToggle.checkbox.checked = false;
+				this.lowercaseToggle.checkbox.disabled = false;
+				this.uppercaseToggle.checkbox.disabled = false;
+				this.numbersToggle.checkbox.disabled = false;
+				this.symbolsToggle.checkbox.disabled = true;
+				this.similarToggle.checkbox.disabled = true;
+				lengthLabel.textContent = "Words:";
 				break;
 			}
 
-			this.txtLength.min = this.rngLength.min;
-			this.txtLength.value = this.rngLength.value;
+			this.lengthInput.min = this.lengthRange.min;
+			this.lengthInput.value = this.lengthRange.value;
 
 			this.Generate();
 		};
 
-		this.chkLowercase.onchange = this.chkUppercase.onchange = this.chkNumbers.onchange = this.chkSymbols.onchange = this.chkSimilar.onchange = ()=> this.Generate();
+		this.lowercaseToggle.checkbox.onchange = this.uppercaseToggle.checkbox.onchange = this.numbersToggle.checkbox.onchange = this.symbolsToggle.checkbox.onchange = this.similarToggle.checkbox.onchange = ()=> this.Generate();
 
-		btnGenerate.onclick = ()=> this.Generate();
+		generateButton.onclick = ()=> this.Generate();
 
-		btnCopy.onclick = ()=> {
-			this.txtPassword.focus();
-			this.txtPassword.select();
-			document.execCommand("copy");
+		copyButton.onclick = ()=> {
+			try {
+				navigator.clipboard.writeText(this.passwordInput.value);
+
+				if (copyButton.style.animation === "") {
+					copyButton.style.animation = "bg-roll-up .6s linear";
+					setTimeout(()=>copyButton.style.animation = "", 600);
+				}
+			}
+			catch (ex) {
+				this.ConfirmBox(ex, true, "mono/error.svg");
+			}
 		};
 
-		this.txtPassword.oninput = ()=> {
+		this.passwordInput.oninput = ()=> {
 			if (this.cmbOptions.value === "mem") {
-				let phrase = this.txtPassword.value.split("-");
-				this.rngLength.value = phrase.length;
-				this.txtLength.value = phrase.length;
+				let phrase = this.passwordInput.value.split("-");
+				this.lengthRange.value = phrase.length;
+				this.lengthInput.value = phrase.length;
+				this.Strength();
 				return;
 			}
 
-			let word = this.txtPassword.value;
+			let word = this.passwordInput.value;
 
-			this.rngLength.value = word.length;
-			this.txtLength.value = word.length;
+			this.lengthRange.value = word.length;
+			this.lengthInput.value = word.length;
 
 			let hasUppercase = false;
 			let hasLowercase = false;
@@ -309,14 +307,15 @@ class PassGen extends Window {
 				else hasSymbols = true;
 			}
 
-			this.chkLowercase.checked = hasLowercase;
-			this.chkUppercase.checked = hasUppercase;
-			this.chkNumbers.checked = hasNumbers;
-			this.chkSymbols.checked = hasSymbols;
+			this.lowercaseToggle.checkbox.checked = hasLowercase;
+			this.uppercaseToggle.checkbox.checked = hasUppercase;
+			this.numbersToggle.checkbox.checked = hasNumbers;
+			this.symbolsToggle.checkbox.checked = hasSymbols;
 
 			this.Strength();
 		};
 
+		this.cmbOptions.onchange();
 		this.Generate();
 
 		this.LoadWords();
@@ -329,46 +328,60 @@ class PassGen extends Window {
 			if (response.status !== 200) LOADER.HttpErrorHandler(response.status);
 
 			const words = await response.text();
-			if (words.error) throw (json.error);
+			if (words.error) throw (words.error);
 
 			if (words.length > 2) this.words = words.split("\n");
 
-			let optMemorable = document.createElement("option");
-			optMemorable.value = "mem";
-			optMemorable.text = "Memorable";
-			this.cmbOptions.appendChild(optMemorable);
+			let memorableOption = document.createElement("option");
+			memorableOption.value = "mem";
+			memorableOption.text = "Memorable";
+			this.cmbOptions.appendChild(memorableOption);
 
 		}
 		catch {}
 	}
 
+	static RandomInt(max) {
+		const limit = Math.floor(0x100000000 / max) * max;
+		const buffer = new Uint32Array(1);
+		do {
+			crypto.getRandomValues(buffer);
+		} while (buffer[0] >= limit);
+		return buffer[0] % max;
+	}
+
 	Generate() {
-		if (!this.chkLowercase.checked && !this.chkUppercase.checked && !this.chkNumbers.checked && !this.chkSymbols.checked)
-			this.chkLowercase.checked = true;
+		if (!this.lowercaseToggle.checkbox.checked && !this.uppercaseToggle.checkbox.checked && !this.numbersToggle.checkbox.checked && !this.symbolsToggle.checkbox.checked) {
+			this.lowercaseToggle.checkbox.checked = true;
+		}
 
 		if (this.cmbOptions.value === "mem") {
 			let word = "";
-			if (this.words)
-				for (let i = 0; i < this.rngLength.value; i++) {
-					if (this.chkLowercase.checked && this.chkUppercase.checked) {
-						let w = this.words[Math.round(Math.random() * this.words.length)];
+			let substitutable = 0;
+			if (this.words) {
+				for (let i = 0; i < this.lengthRange.value; i++) {
+					if (this.lowercaseToggle.checkbox.checked && this.uppercaseToggle.checkbox.checked) {
+						let w = this.words[PassGen.RandomInt(this.words.length)];
 						word += w[0].toUpperCase() + w.substring(1);
 					}
-					else if (this.chkUppercase.checked){
-						word += this.words[Math.round(Math.random() * this.words.length)].toUpperCase();
+					else if (this.uppercaseToggle.checkbox.checked){
+						word += this.words[PassGen.RandomInt(this.words.length)].toUpperCase();
 					}
 					else {
-						word += this.words[Math.round(Math.random() * this.words.length)];
+						word += this.words[PassGen.RandomInt(this.words.length)];
 					}
-					
-					if (i+1 < this.rngLength.value)word += "-";
-				}
 
-			if (this.chkNumbers.checked) {
+					if (i+1 < this.lengthRange.value)word += "-";
+				}
+			}
+
+			if (this.numbersToggle.checkbox.checked) {
 				let temp = word;
 				word = "";
-				for (let i = 0; i < temp.length; i++)
-					if (Math.random() > .4) {
+				for (let i=0; i<temp.length; i++) {
+					if ("ieast".includes(temp[i].toLowerCase())) substitutable++;
+
+					if (PassGen.RandomInt(10) >= 4) {
 						let c = temp[i].toLowerCase();
 
 						if (c === "i") word += "1";
@@ -377,14 +390,20 @@ class PassGen extends Window {
 						else if (c === "s") word += "5";
 						else if (c === "t") word += "7";
 						else word += temp[i];
-
 					}
 					else {
 						word += temp[i];
 					}
+				}
 			}
 
-			this.txtPassword.value = word;
+			const wordCount = this.words && word.length > 0 ? parseInt(this.lengthRange.value) : 0;
+			this.generated = {
+				value  : word,
+				entropy: wordCount * Math.log2(this.words?.length ?? 1) + substitutable * PassGen.SUBSTITUTION_BITS
+			};
+
+			this.passwordInput.value = word;
 			this.Strength();
 			return;
 		}
@@ -392,78 +411,100 @@ class PassGen extends Window {
 		let pool = [];
 		let flag = [];
 
-		if (this.chkLowercase.checked) {
-			pool.push(this.chkSimilar.checked ? "abcdefghijklmnopqrstuvwxyz" : "abcdefghijkmnpqrstuvwxyz");
+		if (this.lowercaseToggle.checkbox.checked) {
+			pool.push(this.similarToggle.checkbox.checked ? "abcdefghijklmnopqrstuvwxyz" : "abcdefghijkmnpqrstuvwxyz");
 			flag.push(false);
 		}
 
-		if (this.chkUppercase.checked) {
-			pool.push(this.chkSimilar.checked ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "ABCDEFGHJKLMNPQRSTUVWXYZ");
+		if (this.uppercaseToggle.checkbox.checked) {
+			pool.push(this.similarToggle.checkbox.checked ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "ABCDEFGHJKLMNPQRSTUVWXYZ");
 			flag.push(false);
 		}
 
-		if (this.chkSymbols.checked) {
+		if (this.symbolsToggle.checkbox.checked) {
 			pool.push("!#$%&()*+-<=>?@^_~,./[\\]{}");
 			flag.push(false);
 		}
 
-		if (this.chkNumbers.checked) {
-			pool.push(this.chkSimilar.checked ? "0123456789" : "23456789");
+		if (this.numbersToggle.checkbox.checked) {
+			pool.push(this.similarToggle.checkbox.checked ? "0123456789" : "23456789");
 			flag.push(false);
 		}
 
 		let word = "";
-		for (let i = 0; i < this.rngLength.value; i++) {
-			let dice = Math.round(Math.random() * (pool.length + 1));
+		for (let i=0; i<this.lengthRange.value; i++) {
+			let dice = PassGen.RandomInt(pool.length + 1);
 			if (dice < pool.length) {
-				word += pool[dice][Math.round(Math.random() * (pool[dice].length - 1))];
+				word += pool[dice][PassGen.RandomInt(pool[dice].length)];
 				flag[dice] = true;
-
 			}
 			else {
 				let ok = false;
 
-				for (let j = 0; j < flag.length; j++)
+				for (let j=0; j<flag.length; j++)
 					if (!flag[j]) {
-						word += pool[j][Math.round(Math.random() * (pool[j].length - 1))];
+						word += pool[j][PassGen.RandomInt(pool[j].length)];
 						flag[j] = true;
 						ok = true;
 						break;
 					}
 
 				if (!ok) {
-					dice = Math.round(Math.random() * (pool.length - 1));
-					word += pool[dice][Math.round(Math.random() * (pool[dice].length - 1))];
+					dice = PassGen.RandomInt(pool.length);
+					word += pool[dice][PassGen.RandomInt(pool[dice].length)];
 					flag[dice] = true;
 				}
 			}
 		}
 
-		this.txtPassword.value = word;
+		const bitsPerCharacter = Math.log2(pool.length) + pool.reduce((sum, set)=> sum + Math.log2(set.length), 0) / pool.length;
+		this.generated = {
+			value  : word,
+			entropy: bitsPerCharacter * word.length
+		};
+
+		this.passwordInput.value = word;
 		this.Strength();
 	}
 
-	Strength() {
-		let pool = 0;
-		if (this.chkNumbers.checked) pool += 10;
-		if (this.chkUppercase.checked) pool += 26;
-		if (this.chkLowercase.checked) pool += 26;
-		if (this.chkSymbols.checked) pool += 30;
+	static EstimateEntropy(password) {
+		for (const common of PassGen.COMMON) {
+			password = password.replace(new RegExp(common.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+		}
 
-		let entropy = Math.log(pool, 2) * this.txtPassword.value.length;
-		//same as     Math.log(Math.pow(pool, this.txtPassword.value.length), 2));
+		let hasNumbers = false, hasUppercase = false, hasLowercase = false, hasSymbols = false;
+		for (let i = 0; i < password.length; i++) {
+			const b = password.charCodeAt(i);
+			if (b > 47 && b < 58) hasNumbers = true;
+			else if (b > 64 && b < 91) hasUppercase = true;
+			else if (b > 96 && b < 123) hasLowercase = true;
+			else hasSymbols = true;
+		}
+
+		let pool = 0;
+		if (hasNumbers)   pool += 10;
+		if (hasUppercase) pool += 26;
+		if (hasLowercase) pool += 26;
+		if (hasSymbols)   pool += 33;
+
+		return pool === 0 ? 0 : Math.log2(pool) * password.length;
+	}
+
+	Strength() {
+		const value = this.passwordInput.value;
+
+		const entropy = this.generated?.value === value ? this.generated.entropy : PassGen.EstimateEntropy(value);
 
 		let strength = PassGen.StrengthBar(entropy);
-		let color    = strength[0];
-		let fill     = strength[1];
-		let comment  = strength[2];
+		let color = strength[0];
+		let fill = strength[1];
+		let comment = strength[2];
 
-		this.divBar.style.boxShadow = `${color} ${Math.round(fill)}px 0 0 inset`;
-		this.lblComment.textContent = comment;
-		this.lblEntropyValue.textContent = Math.round(entropy);
+		this.strengthBar.style.boxShadow = `${color} ${Math.round(fill)}px 0 0 inset, color-mix(in srgb, ${color} 66%, #202020) ${Math.round(fill+1)}px 0 0 inset`;
+		this.commentLabel.textContent = comment;
+		this.entropyValueLabel.textContent = Math.round(entropy);
 
-		let combinations = Math.pow(pool, this.txtPassword.value.length);
-		let ttc = combinations / 350000000000; //time to crack in seconds
+		let ttc = 2 ** entropy / 2 / PassGen.GUESSES_PER_SECOND; //time to crack in seconds
 
 		let eon = Math.floor(ttc / (1000000000 * 365 * 24 * 3600));
 		ttc -= eon * 1000000000 * 365 * 24 * 3600;
@@ -483,52 +524,54 @@ class PassGen extends Window {
 		let seconds = Math.round(ttc);
 
 		let etc = ""; //Estimated Time to Crack
-		if (eon != 0)     etc  = eon === 1     ? `1 eon, `    : `${eon} eons, `;
-		if (years != 0)   etc += years === 1   ? `1 year, `   : `${years} years, `;
-		if (days != 0)    etc += days === 1    ? `1 day, `    : `${days} days, `;
-		if (hours != 0)   etc += hours === 1   ? `1 hour, `   : `${hours} hours, `;
-		if (minutes != 0) etc += minutes === 1 ? `1 minute, ` : `${minutes} minutes, `;
+		if (eon != 0)     etc  = eon === 1     ? "1 eon, "    : `${eon} eons, `;
+		if (years != 0)   etc += years === 1   ? "1 year, "   : `${years} years, `;
+		if (days != 0)    etc += days === 1    ? "1 day, "    : `${days} days, `;
+		if (hours != 0)   etc += hours === 1   ? "1 hour, "   : `${hours} hours, `;
+		if (minutes != 0) etc += minutes === 1 ? "1 minute, " : `${minutes} minutes, `;
 
 		if (seconds != 0) {
 			if (etc.length === 0) {
-				etc += seconds === 1 ? `a second` : `${seconds} seconds`;
+				etc += seconds === 1 ? "a second" : `${seconds} seconds`;
 			}
 			else {
-				etc += seconds === 1 ? `and 1 second` : `and ${seconds} seconds`;
+				etc += seconds === 1 ? "and 1 second" : `and ${seconds} seconds`;
 			}
 		}
 
-		if (etc.length === 0) etc = "less then a second";
+		if (etc.length === 0) etc = "less than a second";
 
-		if (eon > 999999999999999)
-			this.lblTtc.textContent = "TTC: Infinity";
-		else
-			this.lblTtc.textContent = `TTC: ${etc}`;
+		if (eon > 999999999999999) {
+			this.ttcLabel.textContent = "TTC: Infinite";
+		}
+		else {
+			this.ttcLabel.textContent = `TTC: ${etc}`;
+		}
 	}
 
 	static StrengthBar(entropy) {
 		let comment = "";
 		let color = "";
 
-		if (entropy < 19) {
+		if (isNaN(entropy) || entropy < 19) {
 			comment = "Forbidden";
-			color = "#f00";
+			color = "var(--clr-critical)";
 		}
 		else if (entropy < 28) {
 			comment = "Very weak";
-			color = "#d00";
+			color = "var(--clr-error)";
 		}
 		else if (entropy < 36) {
 			comment = "Weak";
-			color = "#d70";
+			color = "var(--clr-orange)";
 		}
 		else if (entropy < 60) {
 			comment = "Reasonable";
-			color = "#dc0";
+			color = "var(--clr-warning)";
 		}
 		else if (entropy < 128) {
 			comment = "Strong";
-			color = "#8c2";
+			color = "#6a2";
 		}
 		else {
 			comment = "Overkill";

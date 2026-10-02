@@ -61,7 +61,17 @@ const UI = {
 		UI.regionalFormat = localStorage.getItem("regional_format") ?
 			localStorage.getItem("regional_format") : "sys";
 
-		const pos = JSON.parse(localStorage.getItem("menu_button_pos"));
+		const pos = JSON.parse(localStorage.getItem("menu_button_pos")) ?? {
+			borderRadius: "8px 48px 8px 4px",
+			left: "0px",
+			top: "calc(100% - 48px)",
+			width: "48px",
+			height: "48px",
+			l_left: "8px",
+			l_top: "48px",
+			l_width: "26px",
+			l_height: "26px"
+		};
 		if (pos) {
 			menubutton.style.borderRadius = pos.borderRadius;
 			menubutton.style.left = pos.left;
