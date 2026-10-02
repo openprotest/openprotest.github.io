@@ -30,6 +30,7 @@ const LOADER = {
 		"personalize.js",
 		"locateip.js",
 		"maclookup.js",
+		"dnslookup.js",
 		"passwordgen.js",
 		"encoder.js",
 		"qrgenerator.js",
@@ -47,6 +48,7 @@ const LOADER = {
 		const total = LOADER.baseStyles.length + LOADER.baseScripts.length + LOADER.primaryScripts.length + LOADER.secondaryScripts.length;
 
 		const callbackHandle = (status, filename)=> {
+			if (count >= total) return;
 			loadingbar.style.width = 100 * ++count / total + "%";
 
 			if (LOADER.baseStyles.length + LOADER.baseScripts.length === count) { //load primary
@@ -86,8 +88,12 @@ const LOADER = {
 		cssLink.href = filename;
 		document.head.appendChild(cssLink);
 
-		cssLink.onload = ()=> callback("ok", filename);
-		cssLink.onerror = ()=> callback("error", filename);
+		const Done = status=> {
+			cssLink.onload = cssLink.onerror = null;
+			callback(status, filename);
+		};
+		cssLink.onload = ()=> Done("ok");
+		cssLink.onerror = ()=> Done("error");
 	},
 
 	LoadScript: (filename, callback)=> {
@@ -101,8 +107,12 @@ const LOADER = {
 		script.src = filename;
 		document.body.appendChild(script);
 
-		script.onload = ()=> callback("ok", filename);
-		script.onerror = ()=> callback("error", filename);
+		const Done = status=> {
+			script.onload = script.onerror = null;
+			callback(status, filename);
+		};
+		script.onload = ()=> Done("ok");
+		script.onerror = ()=> Done("error");
 	},
 
 	StoreSession: ()=> {
@@ -162,6 +172,7 @@ const LOADER = {
 		switch (command.class) {
 		case "LocateIp"       : return new LocateIp(command.params);
 		case "MacLookup"      : return new MacLookup(command.params);
+		case "DnsLookup"      : return new DnsLookup(command.params);
 		case "PassGen"        : return new PassGen(command.params);
 		case "Encoder"        : return new Encoder(command.params);
 		case "QrGenerator"    : return new QrGenerator(command.params);

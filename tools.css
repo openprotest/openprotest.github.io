@@ -48,7 +48,7 @@
 	position: absolute;
 	content: "";
 	border: solid;
-	border-color: rgb(192,192,192) transparent;
+	border-color: var(--clr-contrast) transparent;
 	border-width: 12px 8px 0 8px;
 	top: 2px;
 	left: 2px;
