@@ -1,8 +1,13 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
-    static REFRACTION_SCALE = .4;
-    static PIECE_BRIGHTNESS = { w:1.2, b:.6 };
+    static REFRACTION_SCALE = .25
+    ;
+    static PIECE_TONE = { w:{ slope:1, intercept:.35 }, b:{ slope:.7, intercept:-.12 } }; //of the refracted board: an intercept shifts it without flattening it, as the tint does
+    static TILT = 45;          //deg, of the board in perspective
+    static PERSPECTIVE = 2.5;  //the viewer's distance, in board sizes
+    static PIECE_FOOT = .93;   //where the piece images stand, in squares
+    static PIECE_STEP = .13;   //standing pieces step back from the front edge of their square
 
     static instances = 0;
     static pieceMaps = {};
@@ -215,6 +220,7 @@ class Chess extends Window {
 
         this.SetTitle("Chess");
         this.SetIcon("chess/king.svg");
+
         this.content.style.overflow = "hidden";
 
         this.board = document.createElement("div");
@@ -229,8 +235,8 @@ class Chess extends Window {
         
         this.content.appendChild(this.board);
 
-        this.playerA = "ui";
-        this.playerB = "ai";
+        this.playerA = this.params?.playerA ?? "ui"; //white
+        this.playerB = this.params?.playerB ?? "ai"; //black
 
         this.game = {
             fen: null,
@@ -254,14 +260,15 @@ class Chess extends Window {
         this.coordsLayer = Chess.CreateSvg("g");
         this.indicatorsLayer = Chess.CreateSvg("g");
         this.piecesLayer = Chess.CreateSvg("g");
+        this.hintLayer = Chess.CreateSvg("g", { class:"chess-hint-layer" }); //the engine's move while reading, see ChessReader.UpdateHint
         this.sceneLayer = Chess.CreateSvg("g", { id:`${this.uid}-scene` }); //a moving piece refracts a copy of this, other pieces included
         this.liftLayer = Chess.CreateSvg("g"); //moving pieces, over the scene and outside it, see LiftPiece
         this.boardLayer.append(this.squaresLayer, this.highlightsLayer, this.coordsLayer);
-        this.sceneLayer.append(this.boardLayer, this.indicatorsLayer, this.piecesLayer);
+        this.sceneLayer.append(this.boardLayer, this.indicatorsLayer, this.piecesLayer, this.hintLayer);
         this.svg.append(this.defs, this.sceneLayer, this.liftLayer);
 
         this.squares = [[], [], [], [], [], [], [], []];
-        for (let y = 0; y < 8; y++)
+        for (let y = 0; y < 8; y++) 
             for (let x = 0; x < 8; x++) {
                 const square = Chess.CreateSvg("rect", {
                     class : (x + y) % 2 === 0 ? "chess-square chess-square-light" : "chess-square chess-square-dark",
@@ -275,7 +282,9 @@ class Chess extends Window {
 
         this.legalMoves = [];
         this.indicators = [];
-        this.isFlipped = false;
+        this.isFlipped = this.GetPlayerSide() === "b"; //the player's side at the bottom
+        this.is3d = false;
+        this.pieceCount = 0; //for the ids, a piece refracts the one behind it by id
         this.isGameOver = false;
         this.positions = []; //PositionKey of every position of the game, for repetitions
         this.history = [];   //{fen, san} of every position, the first one is the starting position with no move
@@ -287,17 +296,37 @@ class Chess extends Window {
         this.fileLabels = [];
         for (let i = 0; i < 8; i++) {
             const rank = Chess.CreateSvg("text", { class:"chess-coord", x:.06, y:i + .06, "dominant-baseline":"hanging" });
-            rank.style.fill = i % 2 === 0 ? "rgb(84,84,84)" : "rgb(108,108,108)";
+            rank.style.fill = i % 2 === 0 ? "rgb(72,72,72)" : "rgb(108,108,108)";
             this.coordsLayer.appendChild(rank);
             this.rankLabels.push(rank);
 
             const file = Chess.CreateSvg("text", { class:"chess-coord", x:i + .94, y:7.94, "text-anchor":"end" });
-            file.style.fill = i % 2 === 0 ? "rgb(108,108,108)" : "rgb(84,84,84)";
+            file.style.fill = i % 2 === 0 ? "rgb(108,108,108)" : "rgb(72,72,72)";
             this.coordsLayer.appendChild(file);
             this.fileLabels.push(file);
         }
 
         this.Layout();
+
+        this.menubar = document.createElement("div");
+        this.menubar.className = "chess-menubar";
+        this.content.appendChild(this.menubar);
+
+        const newButton = this.CreateMenuButton("New game", "url(chess/pawn.svg)");
+        newButton.style.backgroundSize = "40px 40px";
+        newButton.style.backgroundPosition = "50% -2px";
+        newButton.style.left = "2px";
+
+        const flipButton = this.CreateMenuButton("Flip board", "url(mono/update.svg)");
+        flipButton.style.left = "50px";
+
+        const fenButton = this.CreateMenuButton("Copy FEN", "url(mono/copy.svg)");
+        fenButton.style.left = "98px";
+
+        const readButton = this.CreateMenuButton("Read mode", "url(mono/screenrecord.svg)");
+        readButton.style.left = "146px";
+        
+        this.menubar.append(newButton, flipButton, fenButton, readButton);
 
         this.sidepanel = document.createElement("div");
         this.sidepanel.className = "chess-sidepanel";
@@ -307,7 +336,15 @@ class Chess extends Window {
         this.moveslist.className = "chess-moveslist";
         this.sidepanel.appendChild(this.moveslist);
 
+        newButton.onclick = ()=> this.NewGameDialog();
+        flipButton.onclick = ()=> this.FlipBoard();
+        fenButton.onclick = ()=> this.FenDialog();
+        readButton.onclick = ()=> this.ReadMode();
+        this.readButton = readButton; //lit while reading
+        this.reader = null; //a ChessReader, while reading
+
         this.win.addEventListener("keydown", event=> {
+            if (event.target.closest("input, select, textarea") || this.win.querySelector(".win-dim")) return; //typing, or in a dialog
             if (event.key === "ArrowLeft") this.ShowMove(this.view - 1);
             else if (event.key === "ArrowRight") this.ShowMove(this.view + 1);
             else if (event.key === "Home") this.ShowMove(0);
@@ -316,8 +353,8 @@ class Chess extends Window {
             event.preventDefault();
         });
 
-        setTimeout(() => { this.AfterResize(); }, WIN.ANIME_DURATION);
-        setTimeout(() => { this.AfterResize(); }, 1000);
+        setTimeout(()=> { this.AfterResize(); }, WIN.ANIME_DURATION);
+        setTimeout(()=> { this.AfterResize(); }, 1000);
 
         if (this.playerA === "ai" || this.playerB === "ai") {
             this.InitWasmChessAi();
@@ -325,6 +362,165 @@ class Chess extends Window {
         else {
             this.LoadGame(this.params);
         }
+    }
+
+    CreateMenuButton(name, icon) {
+        const button = document.createElement("div");
+        button.setAttribute("tip-below", name);
+        button.style.backgroundImage = icon;
+        return button;
+    }
+
+    NewGameDialog() {
+        const dialog = this.DialogBox("200px");
+        if (dialog === null) return;
+
+        const innerBox  = dialog.innerBox;
+        const dialogBox = innerBox.parentElement;
+        const btnOK     = dialog.btnOK;
+
+        dialogBox.style.maxWidth = "680px";
+        innerBox.style.padding = "20px 20px 0 20px";
+        btnOK.value = "Start";
+
+        const AddLabel = text=> {
+            const label = document.createElement("div");
+            label.textContent = text;
+            label.style.display = "inline-block";
+            label.style.minWidth = "120px";
+            innerBox.appendChild(label);
+        };
+
+        AddLabel("Play as:");
+        const sides = {};
+        for (const [side, name] of [["w", "White"], ["b", "Black"]]) {
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = `${this.uid}-side`;
+            radio.id = `${this.uid}-side-${side}`;
+            radio.checked = side === this.GetPlayerSide();
+
+            const label = document.createElement("label");
+            label.htmlFor = radio.id;
+            label.textContent = name;
+            label.style.marginRight = "16px";
+
+            innerBox.append(radio, label);
+            sides[side] = radio;
+        }
+
+        innerBox.appendChild(document.createElement("br"));
+        innerBox.appendChild(document.createElement("br"));
+
+        AddLabel("From FEN:");
+        const fenInput = document.createElement("input");
+        fenInput.type = "text";
+        fenInput.placeholder = "Starting position";
+        fenInput.value = Chess.FEN_START;
+        fenInput.spellcheck = false;
+        fenInput.style.width = "calc(100% - 128px)";
+        innerBox.appendChild(fenInput);
+
+        const status = document.createElement("div");
+        status.style.margin = "8px 0 0 128px";
+        innerBox.appendChild(status);
+
+        let imported = { fen: Chess.FEN_START };
+        let lastActive = "w";
+
+        const Update = ()=> {
+            if (imported.error) {
+                status.textContent = imported.error;
+                status.style.color = "var(--clr-error)";
+                btnOK.disabled = true;
+                return;
+            }
+
+            const active = imported.fen ? imported.fen.split(" ")[1] : "w";
+            const player = sides.w.checked ? "w" : "b";
+            status.textContent = `${active === "w" ? "White" : "Black"} to move, ${active === player ? "you move first" : "the computer moves first"}`;
+            status.style.color = "";
+            btnOK.disabled = false;
+        };
+
+        fenInput.oninput = ()=> {
+            const text = fenInput.value.trim();
+            imported = text.length === 0 ? { fen: null } : this.ImportFen(text);
+
+            const active = imported.fen ? imported.fen.split(" ")[1] : "w";
+            if (!imported.error && active !== lastActive) { //a new side to move: most likely the side to play, it can still be changed
+                sides[active].checked = true;
+                lastActive = active;
+            }
+
+            Update();
+        };
+
+        sides.w.onchange = sides.b.onchange = Update;
+        Update();
+
+        fenInput.onkeydown = event=> {
+            if (event.key === "Enter") btnOK.onclick();
+        };
+
+        btnOK.onclick = ()=> {
+            if (imported.error) return;
+            dialog.Close();
+            this.NewGame(sides.w.checked ? "w" : "b", imported.fen);
+        };
+
+        setTimeout(()=> fenInput.select(), 0); //a paste replaces it
+    }
+
+    FenDialog() {
+        if (this.history.length === 0) return; //nothing loaded yet
+
+        const dialog = this.DialogBox("150px");
+        if (dialog === null) return;
+
+        const innerBox  = dialog.innerBox;
+        const dialogBox = innerBox.parentElement;
+        const btnOK     = dialog.btnOK;
+        btnOK.value     = "Copy";
+
+        dialogBox.style.maxWidth = "640px";
+        innerBox.style.padding = "40px 40px 0 40px";
+
+        const fenInput = document.createElement("input");
+        fenInput.type = "text";
+        fenInput.readOnly = true;
+        fenInput.spellcheck = false;
+        fenInput.style.width = "calc(100% - 8px)"; //its margins
+        fenInput.value = this.ExportFen(this.history[this.view].fen);
+        innerBox.appendChild(fenInput);
+
+        btnOK.onclick = ()=> {
+            Promise.resolve()
+            .then(()=> navigator.clipboard.writeText(fenInput.value)) //throws where there's no clipboard, as on plain http
+            .then(()=> dialog.Close())
+            .catch(()=> fenInput.select()); //left selected, to copy by hand
+        };
+
+        fenInput.onkeydown = event=> {
+            if (event.key === "Enter") btnOK.onclick();
+        };
+
+        setTimeout(()=> fenInput.select(), 0);
+    }
+
+    //Reads the position of a board on the screen, see ChessReader. Toggles.
+    ReadMode() {
+        if (this.reader) this.reader.Stop();
+        else new ChessReader(this).Start();
+    }
+
+    Close() { //override
+        this.reader?.Stop();
+        super.Close();
+    }
+
+    GetPlayerSide() {
+        return this.playerA === "ai" && this.playerB === "ui" ? "b" : "w";
     }
 
     InitWasmChessAi() {
@@ -344,10 +540,10 @@ class Chess extends Window {
     }
 
     PlayAiMove(delay = 500) {
-        if (!this.IsAiTurn()) return;
+        if (!this.IsAiTurn() || this.reader) return; //while reading, the board follows the shared one
 
         setTimeout(()=> {
-            if (this.isClosed || this.isGameOver) return;
+            if (this.isClosed || this.isGameOver || this.reader) return;
             if (!this.IsAiTurn() || !this.IsLive()) return; //played by an earlier call, or showing history
 
             let aiMove = null;
@@ -470,12 +666,21 @@ class Chess extends Window {
         return true;
     }
 
-    NewGame() {
+    //Starts a game with the player on [side] and the ai on the other, from a fen or the starting position.
+    NewGame(side = this.GetPlayerSide(), fen = null) {
         this.isGameOver = false;
         for (const cover of this.content.querySelectorAll(".chess-cover")) cover.remove();
 
-        this.LoadGame(null);
-        this.PlayAiMove();
+        this.playerA = side === "w" ? "ui" : "ai";
+        this.playerB = side === "w" ? "ai" : "ui";
+
+        this.LoadGame(fen);
+
+        const isFlipping = this.isFlipped !== (side === "b"); //the player's side at the bottom
+        if (isFlipping) this.FlipBoard();
+
+        //the ai opens when it plays white, or when the fen gives it the move. after the flip
+        if (!this.CheckGameOver()) this.PlayAiMove(isFlipping ? 900 : 500);
     }
 
     //Loads a game from params: the moves history, a single fen, or nothing for a new game.
@@ -507,7 +712,7 @@ class Chess extends Window {
     //Keeps the moves history in params, which LOADER.StoreSession saves when the page unloads.
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = { history: this.history };
+        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB };
     }
 
     IsLive() {
@@ -565,12 +770,18 @@ class Chess extends Window {
             this.sidepanel.style.visibility = "visible";
             this.sidepanel.style.opacity = "1";
             this.sidepanel.style.transform = "none";
+
+            this.menubar.style.width = "250px";
+
             offset = -125;
         }
         else {
             this.sidepanel.style.visibility = "hidden";
             this.sidepanel.style.opacity = "0";
             this.sidepanel.style.transform = "translateX(100%)";
+
+            this.menubar.style.width = "44px";
+
             offset = 0;
         }
 
@@ -580,17 +791,34 @@ class Chess extends Window {
         this.board.style.height = min + "px";
         this.board.style.left = (w - min) / 2 + offset + "px";
         this.board.style.top = (h - min) / 2 + "px";
+
+        if (this.is3d) {
+            const distance = Chess.PERSPECTIVE, tilt = Chess.TILT * Math.PI / 180;
+            const back = .59; //the half board, and the back rank that stands over its edge: a king, about .6 of a square
+            const near = distance / (distance - .5 * Math.sin(tilt)); //the front edge comes nearer and widens
+            const far = distance / (distance + back * Math.sin(tilt));
+            const top = -back * Math.cos(tilt) * far, bottom = .5 * Math.cos(tilt) * near; //projected, in board sizes from the center
+
+            const scale = Math.min(1, (w + offset * 2) * .95 / (near * min), h * .95 / ((bottom - top) * min));
+            const shift = -(top + bottom) / 2 * scale * min; //centers the projection, not the board
+
+            this.projection = { scale: scale, shift: shift, distance: distance * min, tilt: tilt };
+            this.board.style.transform = `translateY(${shift}px) scale(${scale}) perspective(${distance * min}px) rotateX(${Chess.TILT}deg)`;
+        }
+        else {
+            this.projection = null;
+            this.board.style.transform = "";
+        }
     }
 
-    //Turns the board by 180deg, with the pieces on it. The pieces counter-turn, so they stay upright.
     FlipBoard() {
         if (this.selected) return;
 
         this.isFlipped = !this.isFlipped;
         const pieces = [...this.piecesLayer.children, ...this.liftLayer.children];
 
-        //at once: everything to its mirrored square and the board turned by 180deg, so nothing has moved on screen yet
         this.board.classList.add("chess-instant", "chess-flipping");
+        this.UpdateRefractions();
         this.Layout(false);
         for (const piece of pieces) {
             const d = piece.displayPosition;
@@ -599,7 +827,6 @@ class Chess extends Window {
         this.svg.style.transform = "rotate(180deg)";
         getComputedStyle(this.svg).transform; //the transitions start from here
 
-        //then the board turns back to 0, and each piece the opposite way at the same pace
         this.board.classList.remove("chess-instant");
         this.svg.style.transform = "rotate(0deg)";
         for (const piece of pieces) {
@@ -611,7 +838,27 @@ class Chess extends Window {
         this.flipTimer = setTimeout(()=> {
             this.board.classList.remove("chess-flipping"); //the coordinates fade back in
             this.svg.style.transform = "";
+            this.SortPieces(); //once they stand still, moving them in the dom would cut their transitions
         }, 650);
+    }
+
+    //Tilts the board back in perspective, with the pieces standing on it. Or lays it flat again.
+    TogglePerspective() {
+        if (this.selected) return;
+
+        this.is3d = !this.is3d;
+
+        this.board.classList.add("chess-tilting"); //the pieces stand up at the pace the board tilts
+        this.UpdateRefractions();
+        this.AfterResize();
+        for (const piece of [...this.piecesLayer.children, ...this.liftLayer.children])
+            this.SetPieceDisplayPosition(piece, piece.displayPosition.x, piece.displayPosition.y);
+
+        clearTimeout(this.tiltTimer);
+        this.tiltTimer = setTimeout(()=> {
+            this.board.classList.remove("chess-tilting");
+            this.UpdateRefractions();
+        }, 450);
     }
 
     ToDisplay(x, y) {
@@ -622,7 +869,6 @@ class Chess extends Window {
         return this.ToDisplay(x, y); //mirroring is its own inverse
     }
 
-    //Positions an element of a square (square, highlight or indicator) at board coordinates.
     PlaceOnSquare(element, x, y, inset = 0) {
         element.boardPosition = { x: x, y: y };
         element.inset = inset;
@@ -631,7 +877,6 @@ class Chess extends Window {
         element.setAttribute("y", d.y + inset);
     }
 
-    //Positions everything for the current orientation. The pieces slide there, unless [slide] is false.
     Layout(slide = true) {
         for (const element of this.svg.querySelectorAll("rect"))
             if (element.boardPosition) this.PlaceOnSquare(element, element.boardPosition.x, element.boardPosition.y, element.inset);
@@ -657,9 +902,10 @@ class Chess extends Window {
                 this.SetPieceDisplayPosition(piece, d.x, d.y);
             }
         }
+
+        this.reader?.DrawHint();
     }
 
-    //Moves a piece to a square, with the move transition. It's lifted while it slides, so it refracts the pieces it passes over.
     MovePiece(piece, x, y) {
         piece.setAttribute("p", `${x}${y}`);
         const d = this.ToDisplay(x, y);
@@ -682,9 +928,55 @@ class Chess extends Window {
         piece.displayPosition = { x: x, y: y };
         piece.scale = scale;
         piece.rotation = rotation;
+
+        //svg content can't turn in 3d, so in perspective a piece stands as a billboard: stretched up from its foot by as much
+        //as the board's projection shortens it, it faces the viewer at its full height. it's innermost, so it stays upright while the board flips
+        const foot = Chess.PIECE_FOOT;
+        const step = this.is3d ? Chess.PIECE_STEP : 0;
+        let stand = 1;
+        if (this.is3d) {
+            //the projection shortens the board by cos(tilt)·s² down and by s across, s being how much nearer things grow.
+            //stretched by 1/(cos(tilt)·s) at its foot, a piece keeps its proportions, only scaled by its depth
+            const tilt = Chess.TILT * Math.PI / 180, distance = Chess.PERSPECTIVE;
+            const turn = -rotation * Math.PI / 180; //the svg turns opposite to the piece, so this is where it's seen while the board flips
+            const depth = 4 + (x - 3.5) * Math.sin(turn) + (y - 3.5) * Math.cos(turn) + foot - step - .5; //of the foot, in squares
+            const v = (depth - 4) / 8; //from the board's center towards the viewer, in board sizes
+            stand = (distance - v * Math.sin(tilt)) / (distance * Math.cos(tilt));
+        }
+
         //in an svg, px are user units: squares. the board copy gets the inverse, so it stays aligned with the board
-        piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px)`;
-        piece.boardCopy.style.transform = `translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
+        piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px) translate(0px, ${foot - step}px) scale(1, ${stand}) translate(0px, ${-foot}px)`;
+        piece.hit.style.transform = `translate(0px, ${foot}px) scale(1, ${1 / stand}) translate(0px, ${step - foot}px)`; //stays on its square, the one it's picked from
+        piece.copy.style.transform = `translate(0px, ${foot}px) scale(1, ${1 / stand}) translate(0px, ${step - foot}px) translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
+    }
+
+    //Orders the pieces from the back of the board to the front, so the standing ones cover the squares behind them.
+    SortPieces() {
+        const pieces = [...this.piecesLayer.children].sort((a, b)=> a.displayPosition.y - b.displayPosition.y);
+        for (let i = 0; i < pieces.length; i++)
+            if (this.piecesLayer.children[i] !== pieces[i]) //moves only what's out of place
+                this.piecesLayer.insertBefore(pieces[i], this.piecesLayer.children[i]);
+
+        this.UpdateRefractions();
+    }
+
+    //In perspective a standing piece covers part of the piece behind it, so with the board it refracts that one too. Which refracts
+    //the one behind it in turn, so a file shows through, at a cost that grows with the file, not the board.
+    //Between resting pieces only, so the references can't loop: a moving piece refracts the whole scene, with the resting pieces in it.
+    //And none while they all turn: a copy is rebuilt on every change of its piece, so it would jump to the end of the transition.
+    UpdateRefractions() {
+        const isStill = this.is3d && !this.board.classList.contains("chess-flipping") && !this.board.classList.contains("chess-tilting");
+        const resting = [...this.piecesLayer.children];
+
+        for (const piece of [...resting, ...this.liftLayer.children]) {
+            const d = piece.displayPosition;
+            const behind = isStill && piece.parentNode === this.piecesLayer ? resting.find(o=> o.displayPosition.x === d.x && o.displayPosition.y === d.y - 1) : null;
+            const href = behind ? `#${behind.id}` : null;
+
+            if (piece.behindCopy.getAttribute("href") === href) continue; //a new href rebuilds the copy
+            if (href) piece.behindCopy.setAttribute("href", href);
+            else piece.behindCopy.removeAttribute("href");
+        }
     }
 
     LiftPiece(piece) {
@@ -692,6 +984,7 @@ class Chess extends Window {
         if (piece.parentNode === this.liftLayer) return;
 
         this.liftLayer.appendChild(piece);
+        this.UpdateRefractions(); //the piece in front lets go of it, before it refracts the scene, that piece included
         piece.boardCopy.setAttribute("href", `#${this.uid}-scene`);
         getComputedStyle(piece).transform;
     }
@@ -701,15 +994,30 @@ class Chess extends Window {
         if (piece.parentNode !== this.liftLayer || piece.classList.contains("chess-dragging")) return;
 
         this.piecesLayer.appendChild(piece);
-        piece.boardCopy.setAttribute("href", `#${this.uid}-board`);
+        piece.boardCopy.setAttribute("href", `#${this.uid}-board`); //first, in the scene it can't refract the scene
+        this.SortPieces();
     }
 
+    //The board's bounding rect is no use in perspective, it bounds a trapezoid. so from its layout, through the projection.
     ClientToBoard(point) {
-        const rect = this.svg.getBoundingClientRect();
-        return {
-            x: (point.clientX - rect.left) * 8 / rect.width,
-            y: (point.clientY - rect.top) * 8 / rect.height
-        };
+        const rect = this.content.getBoundingClientRect();
+        const zoom = rect.width / this.content.offsetWidth; //the window scales while it opens
+        const size = this.board.offsetWidth;
+
+        //from the board's center, the transform-origin
+        let x = (point.clientX - rect.left) / zoom - this.content.clientLeft - this.board.offsetLeft - size / 2;
+        let y = (point.clientY - rect.top) / zoom - this.content.clientTop - this.board.offsetTop - size / 2;
+
+        if (this.projection) { //back along the line of sight, to the tilted plane
+            const { scale, shift, distance, tilt } = this.projection;
+            x /= scale;
+            y = (y - shift) / scale;
+            const v = y * distance / (distance * Math.cos(tilt) + y * Math.sin(tilt));
+            x *= (distance - v * Math.sin(tilt)) / distance;
+            y = v;
+        }
+
+        return { x: x * 8 / size + 4, y: y * 8 / size + 4 };
     }
 
     LoadFen(notation) {
@@ -719,6 +1027,59 @@ class Chess extends Window {
         this.game = game;
         this.RenderPlacement(this.game.placement, this.game.lastmove);
         this.positions = [this.PositionKey()];
+    }
+
+    //Reads a standard fen, as pasted. Returns {fen} in the form the game keeps, or {error} when it's not a position to play.
+    //The game keeps the en passant as the square of the pawn that moved two squares, not the square it passed.
+    ImportFen(notation) {
+        const fields = notation.trim().split(/\s+/);
+        if (fields.length < 4 || fields.length > 6) return { error: "A FEN has 4 to 6 fields, separated by spaces" };
+        const [placement, active, castling, enpassant, halfmove = "0", fullmove = "1"] = fields;
+
+        const ranks = placement.split("/");
+        if (ranks.length !== 8) return { error: "The placement needs 8 ranks, separated by /" };
+        for (let i = 0; i < 8; i++) {
+            if (!/^[pnbrqkPNBRQK1-8]+$/.test(ranks[i])) return { error: `Rank ${8 - i}: unknown piece` };
+            const count = [...ranks[i]].reduce((sum, o)=> sum + (isNaN(o) ? 1 : parseInt(o)), 0);
+            if (count !== 8) return { error: `Rank ${8 - i} has ${count} squares, not 8` };
+        }
+        if (/[pP]/.test(ranks[0] + ranks[7])) return { error: "Pawns can't stand on the first or last rank" };
+        if (placement.split("K").length !== 2 || placement.split("k").length !== 2) return { error: "Each side needs exactly one king" };
+
+        if (active !== "w" && active !== "b") return { error: "The side to move is w or b" };
+        if (!/^(-|K?Q?k?q?)$/.test(castling)) return { error: "Castling is - or some of KQkq, in that order" };
+        if (!/^\d+$/.test(halfmove) || !/^[1-9]\d*$/.test(fullmove)) return { error: "The move counters are numbers" };
+
+        const game = this.ParseFen(`${placement} ${active} - -`);
+
+        const homes = { K:["K", 7, 7, "R"], Q:["K", 0, 7, "R"], k:["k", 7, 0, "r"], q:["k", 0, 0, "r"] }; //king, rook's x, rank's y, rook
+        for (const right of castling.replace("-", "")) {
+            const [king, rookX, y, rook] = homes[right];
+            if (game.placement[4][y] !== king || game.placement[rookX][y] !== rook)
+                return { error: `Castling ${right} needs its king and rook on their starting squares` };
+        }
+
+        let passant = "-";
+        if (enpassant !== "-") {
+            if (!/^[a-h][36]$/.test(enpassant)) return { error: "The en passant square is on rank 3 or 6" };
+            if ((enpassant[1] === "3") !== (active === "b")) return { error: "The en passant square is behind a pawn of the side that just moved" };
+            passant = enpassant[0] + (enpassant[1] === "3" ? "4" : "5");
+            if (game.placement[enpassant.charCodeAt(0) - 97][8 - parseInt(passant[1])] !== (active === "b" ? "P" : "p"))
+                return { error: `No pawn on ${passant} to take en passant` };
+        }
+
+        if (this.InCheck(game, active === "w" ? "b" : "w"))
+            return { error: `${active === "w" ? "Black" : "White"} is in check, but it's not their move` };
+
+        return { fen: `${placement} ${active} ${castling} ${passant} ${halfmove} ${fullmove}` };
+    }
+
+    //The standard form of a fen the game keeps, the reverse of ImportFen: the en passant as the square the pawn passed,
+    //and without the last move, the game's own 7th field.
+    ExportFen(notation) {
+        const fields = notation.split(" ").slice(0, 6);
+        if (fields[3] !== "-") fields[3] = fields[3][0] + (fields[3][1] === "4" ? "3" : "6");
+        return fields.join(" ");
     }
 
     ParseFen(notation) {
@@ -771,19 +1132,24 @@ class Chess extends Window {
         this.piecesLayer.textContent = "";
         this.liftLayer.textContent = "";
 
-        for (let y = 0; y < 8; y++)
-            for (let x = 0; x < 8; x++)
-                if (placement[x][y] !== null)
-                    this.AddPiece(placement[x][y], { x: x, y: y });
+        for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+                if (placement[x][y] === null) continue;
+                this.AddPiece(placement[x][y], { x: x, y: y });
+            }
+        }
+        this.SortPieces(); //added by rank, backwards when flipped
 
         this.ClearSelection();
         this.ClearIndicators();
+        this.reader?.ClearHint();
         this.MarkLastMove(lastmove);
     }
 
     MarkLastMove(move) {
-        for (const element of this.highlightsLayer.querySelectorAll(".chess-lastmove-from, .chess-lastmove-to"))
+        for (const element of this.highlightsLayer.querySelectorAll(".chess-lastmove-from, .chess-lastmove-to")) {
             element.remove();
+        }
 
         if (!move) return;
 
@@ -848,18 +1214,21 @@ class Chess extends Window {
 
     AddPiece(type, position) {
         const isWhite = type === type.toUpperCase();
-        const piece = Chess.CreateSvg("g", { class: isWhite ? "chess-piece chess-white" : "chess-piece" });
+        const piece = Chess.CreateSvg("g", { id:`${this.uid}-piece${++this.pieceCount}`, class: isWhite ? "chess-piece chess-white" : "chess-piece" });
 
-        const hit = Chess.CreateSvg("rect", { class:"chess-piece-hit", width:1, height:1 }); //takes the pointer events
+        piece.hit = Chess.CreateSvg("rect", { class:"chess-piece-hit", width:1, height:1 }); //takes the pointer events
 
         piece.glass = Chess.CreateSvg("g", { class:"chess-piece-glass" });
         piece.refraction = Chess.CreateSvg("g");
+        piece.copy = Chess.CreateSvg("g", { class:"chess-piece-copy" }); //what it refracts, aligned with the board
         piece.boardCopy = Chess.CreateSvg("use", { href:`#${this.uid}-board` });
+        piece.behindCopy = Chess.CreateSvg("use"); //the piece behind it, see UpdateRefractions
         const tint = Chess.CreateSvg("rect", { class:"chess-piece-tint", width:1, height:1 });
 
-        piece.refraction.appendChild(piece.boardCopy);
+        piece.copy.append(piece.boardCopy, piece.behindCopy);
+        piece.refraction.appendChild(piece.copy);
         piece.glass.append(piece.refraction, tint);
-        piece.append(piece.glass, hit);
+        piece.append(piece.glass, piece.hit);
 
         piece.onmousedown = event => this.Piece_mousedown(event, false, piece);
         piece.addEventListener("touchstart", event => this.Piece_mousedown(event, true, piece)); //ontouch* handlers don't fire where touch is off by default, like desktop chrome
@@ -904,7 +1273,7 @@ class Chess extends Window {
         const displacement = Chess.CreateSvg("feDisplacementMap", { in:"SourceGraphic", in2:"map", scale:Chess.REFRACTION_SCALE, xChannelSelector:"R", yChannelSelector:"G" });
         const brightness = Chess.CreateSvg("feComponentTransfer");
         for (const channel of ["feFuncR", "feFuncG", "feFuncB"])
-            brightness.appendChild(Chess.CreateSvg(channel, { type:"linear", slope:Chess.PIECE_BRIGHTNESS[color] }));
+            brightness.appendChild(Chess.CreateSvg(channel, { type:"linear", ...Chess.PIECE_TONE[color] }));
 
         filter.append(map, displacement, brightness);
         this.defs.appendChild(filter);
@@ -916,6 +1285,7 @@ class Chess extends Window {
     PlayMove(p0, p1, element) {
         if (p0.x === p1.x && p0.y === p1.y) return;
         if (this.isClosed) return;
+        this.reader?.ClearHint();
 
         let isCapture = false;
 

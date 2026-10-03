@@ -40,7 +40,8 @@ const LOADER = {
 		"cameratester.js",
 		"screencapture.js",
 		"rs232.js",
-		"chess/chess.js"
+		"chess/chess.js",
+		"chess/chessreader.js"
 	],
 
 	Initialize: ()=> {

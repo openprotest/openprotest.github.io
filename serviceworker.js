@@ -66,6 +66,7 @@ const FILES_LIST = [
 	"/controls/popout.svg",
 
 	"/chess/chess.js",
+	"/chess/chessreader.js",
 	"/chess/chess.css",
 	"/chess/king.svg",
 	"/chess/king-light.svg",
@@ -79,6 +80,7 @@ const FILES_LIST = [
 	"/mono/chat.svg",
 	"/mono/clear-light.svg",
 	"/mono/clear.svg",
+	"/mono/copy.svg",
 	"/mono/copyleft-light.svg",
 	"/mono/copyleft.svg",
 	"/mono/delete-light.svg",

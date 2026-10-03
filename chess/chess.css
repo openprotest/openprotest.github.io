@@ -1,8 +1,7 @@
 .chess-board {
     position: absolute;
     z-index: 1;
-    transition: left .1s;
-    backdrop-filter: blur(2px);
+    transition: left .1s, transform .4s ease-in-out;
 }
 
 .chess-svg {
@@ -10,16 +9,16 @@
     width: 100%;
     height: 100%;
     overflow: visible;
+    box-shadow: #777 0 0 0 4px;
+    border-radius: 4px;
 }
 
-/*the svg is in board units, a square is 1x1*/
-
 .chess-square-light {
-    fill: rgba(128,128,128,.8);
+    fill: rgba(112,112,112,.8);
 }
 
 .chess-square-dark {
-    fill: rgba(72,72,72,.8);
+    fill: rgba(64,64,64,.8);
 }
 
 .chess-lastmove-from {
@@ -48,18 +47,18 @@
 }
 
 .chess-piece,
-.chess-piece > .chess-piece-glass use {
+.chess-piece-copy {
     transition: transform .4s cubic-bezier(.2,.8,.3,1.2);
 }
 
 .chess-piece.chess-dragging,
-.chess-piece.chess-dragging > .chess-piece-glass use {
+.chess-piece.chess-dragging .chess-piece-copy {
     transition: none;
 }
 
 .chess-flipping .chess-svg,
 .chess-flipping .chess-piece,
-.chess-flipping .chess-piece > .chess-piece-glass use {
+.chess-flipping .chess-piece-copy {
     transition: transform .6s ease-in-out;
 }
 
@@ -68,9 +67,14 @@
     transition: none;
 }
 
+.chess-tilting .chess-piece,
+.chess-tilting .chess-piece-copy {
+    transition: transform .4s ease-in-out;
+}
+
 .chess-instant .chess-svg,
 .chess-instant .chess-piece,
-.chess-instant .chess-piece > .chess-piece-glass use {
+.chess-instant .chess-piece-copy {
     transition: none;
 }
 
@@ -83,11 +87,11 @@
 }
 
 .chess-piece-tint {
-    fill: rgba(16,16,16,.55);
+    fill: rgba(16,16,16,.5);
 }
 
 .chess-white .chess-piece-tint {
-    fill: rgba(255,255,255,.45);
+    fill: rgba(255,255,255,.3);
 }
 
 .chess-move-indicator {
@@ -103,14 +107,53 @@
     stroke-width: .08;
 }
 
+.chess-menubar {
+    position: absolute;
+    z-index: 2;
+    right: 0;
+    top: 0;
+    height: 44px;
+    bottom: 0;
+    width: 250px;
+    color: rgba(64,64,64);
+    background-color: rgb(192,192,192,.6);
+    border-radius: 4px;
+    transition: .2s;
+}
+
+.chess-menubar:hover {
+    width: 250px !important;
+}
+
+.chess-menubar > div {
+    position: absolute;
+    top: 2px;
+    width: 40px;
+    height: 40px;
+    background-size: 28px 28px;
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: 4px;
+    transition: .2s;
+}
+
+.chess-menubar > div:hover {
+    background-color: var(--clr-accent);
+}
+
+.chess-menubar > div:active {
+    background-color: color-mix(in srgb, var(--clr-accent) 80%, black);
+}
+
 .chess-sidepanel {
     position: absolute;
     right: 0;
-    top: 0;
+    top: 52px;
     bottom: 0;
     width: 250px;
     color: rgb(192,192,192);
     background-color: rgba(72,72,72,.6);
+    border-radius: 4px;
     transition: .2s;
 }
 
@@ -217,4 +260,74 @@
 @keyframes chess-fadein {
     0%   { transform: scale(.9); filter: opacity(0) }
     100% { transform: none;      filter: none }
+}
+.chess-menubar > div.chess-active {
+    background-color: var(--clr-accent);
+}
+
+.chess-readpreview {
+    position: absolute;
+    z-index: 3;
+    right: 0;
+    top: 52px;
+    width: 250px;
+    padding: 4px;
+    box-sizing: border-box;
+    color: rgb(192,192,192);
+    background-color: rgba(32,32,32,.85);
+    border-radius: 4px;
+}
+
+.chess-readpreview > canvas {
+    display: block;
+    width: 100%;
+    border-radius: 2px;
+}
+
+.chess-readpreview > div {
+    padding: 4px 2px 0 2px;
+    font-family: monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    -webkit-user-select: text; user-select: text;
+}
+
+.chess-readpreview > .chess-readside {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background-color: rgba(128,128,128,.85);
+    background-size: 22px 22px;
+    background-position: center;
+    background-repeat: no-repeat;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .2s, background-color .2s;
+}
+
+.chess-readpreview:hover > .chess-readside {
+    opacity: 1;
+}
+
+.chess-readpreview > .chess-readside:hover {
+    background-color: var(--clr-accent);
+}
+
+.chess-hint-layer {
+    opacity: .8;
+    pointer-events: none;
+}
+
+.chess-hint-layer > line {
+    stroke: rgb(0,140,255);
+    stroke-width: .16;
+    stroke-linecap: round;
+}
+
+.chess-hint-layer > polygon {
+    fill: rgb(0,140,255);
 }
