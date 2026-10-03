@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 )
@@ -682,6 +683,165 @@ func positionKey(game *Game) string {
 		sb.WriteString(" b")
 	}
 	return sb.String()
+}
+
+const startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+// Opening book: lines of up to 4 moves from the starting position, in from-to notation (castling is the king's move).
+// Positions are matched by positionKey, so a line is also followed when the game transposes into it.
+// A move's weight is the number of lines that play it, so main lines come up more often.
+// A move marked with "?" is never picked, it's there only to book the answer to it.
+var bookLines = []string{
+	//1.e4 e5
+	"e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6",  //Ruy Lopez
+	"e2e4 e7e5 g1f3 b8c6 f1b5 g8f6 e1g1 f6e4",  //Ruy Lopez, Berlin
+	"e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6",  //Italian
+	"e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5",  //Two Knights
+	"e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 f3g5? d7d5", //Two Knights, Ng5
+	"e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f3d4 g8f6",  //Scotch
+	"e2e4 e7e5 g1f3 b8c6 b1c3 g8f6 f1b5 f8b4",  //Four Knights
+	"e2e4 e7e5 g1f3 g8f6 f3e5 d7d6 e5f3 f6e4",  //Petrov
+	"e2e4 e7e5 g1f3 d7d6 d2d4 e5d4 f3d4 g8f6",  //Philidor
+	"e2e4 e7e5 b1c3 g8f6 g2g3 d7d5 e4d5 f6d5",  //Vienna
+	"e2e4 e7e5 f1c4 g8f6 d2d3 c7c6 g1f3 d7d5",  //Bishop's Opening
+	"e2e4 e7e5 f2f4? e5f4 g1f3 d7d6 d2d4 g7g5", //King's Gambit
+	"e2e4 e7e5 d1h5? b8c6 f1c4 g7g6 h5f3 g8f6", //early queen
+	"e2e4 e7e5 f1c4 b8c6 d1h5? g7g6 h5f3 g8f6", //early queen
+	//1.e4 others
+	"e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6", //Sicilian, Open
+	"e2e4 c7c5 g1f3 b8c6 d2d4 c5d4 f3d4 g8f6", //Sicilian, Classical
+	"e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 b8c6", //Sicilian, Taimanov
+	"e2e4 c7c5 g1f3 b8c6 f1b5 g7g6 e1g1 f8g7", //Sicilian, Rossolimo
+	"e2e4 c7c5 c2c3 d7d5 e4d5 d8d5 d2d4 g8f6", //Sicilian, Alapin
+	"e2e4 c7c5 b1c3 b8c6 g2g3 g7g6 f1g2 f8g7", //Sicilian, Closed
+	"e2e4 e7e6 d2d4 d7d5 b1c3 g8f6 c1g5 f8e7", //French, Classical
+	"e2e4 e7e6 d2d4 d7d5 b1c3 f8b4 e4e5 c7c5", //French, Winawer
+	"e2e4 e7e6 d2d4 d7d5 e4e5 c7c5 c2c3 b8c6", //French, Advance
+	"e2e4 e7e6 d2d4 d7d5 b1d2 g8f6 e4e5 f6d7", //French, Tarrasch
+	"e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4 c8f5", //Caro-Kann, Classical
+	"e2e4 c7c6 d2d4 d7d5 e4e5 c8f5 g1f3 e7e6", //Caro-Kann, Advance
+	"e2e4 c7c6 d2d4 d7d5 e4d5 c6d5 f1d3 b8c6", //Caro-Kann, Exchange
+	"e2e4 d7d5 e4d5 d8d5 b1c3 d5a5 d2d4 g8f6", //Scandinavian
+	"e2e4 d7d6 d2d4 g8f6 b1c3 g7g6 g1f3 f8g7", //Pirc
+	"e2e4 g7g6 d2d4 f8g7 b1c3 d7d6 g1f3 g8f6", //Modern
+	"e2e4 g8f6 e4e5 f6d5 d2d4 d7d6 g1f3 c8g4", //Alekhine
+	"e2e4 b8c6? d2d4",
+	"e2e4 b7b6? d2d4",
+	"e2e4 a7a6? d2d4",
+	//1.d4
+	"d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7", //Queen's Gambit Declined
+	"d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 g1f3 c7c6", //Semi-Slav
+	"d2d4 d7d5 c2c4 d5c4 g1f3 g8f6 e2e3 e7e6", //Queen's Gambit Accepted
+	"d2d4 d7d5 c2c4 c7c6 g1f3 g8f6 b1c3 d5c4", //Slav
+	"d2d4 d7d5 g1f3 g8f6 c1f4 e7e6 e2e3 c7c5", //London
+	"d2d4 d7d5 c1f4 g8f6 e2e3 c7c5 c2c3 b8c6", //London
+	"d2d4 g8f6 g1f3 g7g6 c1f4 f8g7 e2e3 e8g8", //London
+	"d2d4 g8f6 c2c4 g7g6 b1c3 f8g7 e2e4 d7d6", //King's Indian
+	"d2d4 g8f6 c2c4 g7g6 b1c3 d7d5 c4d5 f6d5", //Grünfeld
+	"d2d4 g8f6 c2c4 e7e6 b1c3 f8b4 e2e3 e8g8", //Nimzo-Indian
+	"d2d4 g8f6 c2c4 e7e6 g1f3 b7b6 g2g3 c8b7", //Queen's Indian
+	"d2d4 g8f6 c2c4 e7e6 g2g3 d7d5 f1g2 f8e7", //Catalan
+	"d2d4 g8f6 c2c4 c7c5 d4d5 e7e6 b1c3 e6d5", //Benoni
+	"d2d4 g8f6 c1g5 f6e4 g5f4 d7d5 e2e3 c7c5", //Trompowsky
+	"d2d4 f7f5 g2g3 g8f6 f1g2 g7g6 g1f3 f8g7", //Dutch, Leningrad
+	"d2d4 d7d6 e2e4 g8f6",                     //into the Pirc
+	"d2d4 g7g6 e2e4 f8g7",                     //into the Modern
+	"d2d4 e7e6 c2c4 g8f6",
+	"d2d4 c7c5? d4d5",
+	"d2d4 e7e5? d4e5",
+	//flank openings
+	"c2c4 e7e5 b1c3 g8f6 g1f3 b8c6 g2g3 d7d5", //English, Four Knights
+	"c2c4 c7c5 b1c3 b8c6 g2g3 g7g6 f1g2 f8g7", //English, Symmetrical
+	"c2c4 g8f6 b1c3 g7g6 g2g3 f8g7 f1g2 e8g8", //English
+	"g1f3 d7d5 g2g3 g8f6 f1g2 e7e6 e1g1 f8e7", //Réti
+	"g1f3 d7d5 d2d4 g8f6 c2c4 e7e6 b1c3 f8e7", //into the Queen's Gambit
+	"g1f3 g8f6 c2c4 g7g6 b1c3 f8g7 e2e4 d7d6", //into the King's Indian
+	//answers to the other first moves
+	"a2a3? e7e5", "a2a4? e7e5", "b2b3? e7e5", "b2b4? e7e5", "c2c3? d7d5", "d2d3? d7d5", "e2e3? e7e5", "f2f3? e7e5",
+	"f2f4? d7d5", "g2g3? d7d5", "g2g4? d7d5", "h2h3? e7e5", "h2h4? d7d5", "b1a3? e7e5", "b1c3? d7d5", "g1h3? d7d5",
+}
+
+type bookEntry struct {
+	move   Move
+	weight int
+}
+
+// book holds the moves of bookLines by position (see positionKey).
+var book = map[string][]bookEntry{}
+
+// parseSquare is the inverse of squareName, -1 if [name] is not a square.
+func parseSquare(name string) int8 {
+	if len(name) != 2 || name[0] < 'a' || name[0] > 'h' || name[1] < '1' || name[1] > '8' {
+		return -1
+	}
+	return squareOf(int(name[0]-'a'), int('8'-name[1]))
+}
+
+// builds the book. it plays the lines, so it runs after the move tables are ready (init functions run in source order)
+func init() {
+	var fen string = startFen
+	start, _ := loadFen(&fen)
+
+	for _, line := range bookLines {
+		var game Game = start
+
+		for _, token := range strings.Fields(line) {
+			var name string = strings.TrimSuffix(token, "?")
+			var move Move = Move{-1, -1}
+			if len(name) == 4 {
+				move = Move{parseSquare(name[:2]), parseSquare(name[2:])}
+			}
+
+			if !slices.Contains(legalMoves(&game), move) {
+				println("chess: illegal book move", token, "in", line)
+				break
+			}
+
+			if name == token {
+				var key string = positionKey(&game)
+				if i := slices.IndexFunc(book[key], func(e bookEntry) bool { return e.move == move }); i >= 0 {
+					book[key][i].weight++
+				} else {
+					book[key] = append(book[key], bookEntry{move, 1})
+				}
+			}
+
+			game.makeMove(move)
+		}
+	}
+}
+
+// bookMove picks one of the position's book moves at random, by weight. False when the position is not in the book.
+func bookMove(game *Game) (Move, bool) {
+	var entries []bookEntry = book[positionKey(game)]
+	if len(entries) == 0 {
+		return Move{}, false
+	}
+
+	//positionKey leaves out the castling rights, so a book castling might not be legal here
+	var legal []Move = legalMoves(game)
+	var candidates []bookEntry
+	var total int = 0
+	for _, entry := range entries {
+		if slices.Contains(legal, entry.move) {
+			candidates = append(candidates, entry)
+			total += entry.weight
+		}
+	}
+
+	if total == 0 {
+		return Move{}, false
+	}
+
+	var r int = rand.Intn(total)
+	for _, entry := range candidates {
+		if r < entry.weight {
+			return entry.move, true
+		}
+		r -= entry.weight
+	}
+
+	return Move{}, false
 }
 
 type searcher struct {

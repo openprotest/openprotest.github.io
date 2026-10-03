@@ -40,7 +40,10 @@ func calc(this js.Value, i []js.Value) (result any) {
 	}
 
 	//var move Move = randomMove(&game)
-	var move, _ = calculate(&game, 4, history)
+	var move, inBook = bookMove(&game)
+	if !inBook {
+		move, _ = calculate(&game, 4, history)
+	}
 
 	return moveToString(move)
 }
