@@ -1,5 +1,7 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    static LEVEL_DEFAULT = 3;
+    static LEVEL_MAX = 5;
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
     static REFRACTION_SCALE = .25
     ;
@@ -237,6 +239,7 @@ class Chess extends Window {
 
         this.playerA = this.params?.playerA ?? "ui"; //white
         this.playerB = this.params?.playerB ?? "ai"; //black
+        this.level = Math.min(Chess.LEVEL_MAX, Math.max(1, parseInt(this.params?.level) || Chess.LEVEL_DEFAULT));
 
         this.game = {
             fen: null,
@@ -372,7 +375,7 @@ class Chess extends Window {
     }
 
     NewGameDialog() {
-        const dialog = this.DialogBox("200px");
+        const dialog = this.DialogBox("240px");
         if (dialog === null) return;
 
         const innerBox  = dialog.innerBox;
@@ -408,6 +411,28 @@ class Chess extends Window {
             innerBox.append(radio, label);
             sides[side] = radio;
         }
+
+        innerBox.appendChild(document.createElement("br"));
+        innerBox.appendChild(document.createElement("br"));
+
+        AddLabel("Level:");
+        const levelRange = document.createElement("input");
+        levelRange.type = "range";
+        levelRange.min = "1";
+        levelRange.max = Chess.LEVEL_MAX;
+        levelRange.step = "1";
+        levelRange.value = this.level;
+        levelRange.style.width = "200px";
+        levelRange.style.verticalAlign = "middle";
+
+        const levelValue = document.createElement("div");
+        levelValue.textContent = this.level;
+        levelValue.style.display = "inline-block";
+        levelValue.style.marginLeft = "12px";
+        levelValue.style.fontWeight = "600";
+        levelRange.oninput = ()=> levelValue.textContent = levelRange.value;
+
+        innerBox.append(levelRange, levelValue);
 
         innerBox.appendChild(document.createElement("br"));
         innerBox.appendChild(document.createElement("br"));
@@ -466,6 +491,7 @@ class Chess extends Window {
         btnOK.onclick = ()=> {
             if (imported.error) return;
             dialog.Close();
+            this.level = parseInt(levelRange.value);
             this.NewGame(sides.w.checked ? "w" : "b", imported.fen);
         };
 
@@ -548,7 +574,7 @@ class Chess extends Window {
 
             let aiMove = null;
             try {
-                aiMove = ChessAi(this.GetCurrentFen(), 1, this.positions.join(","));
+                aiMove = ChessAi(this.GetCurrentFen(), 5, this.positions.join(","));
             }
             catch (ex) {
                 console.error(ex);
@@ -715,7 +741,7 @@ class Chess extends Window {
     //Keeps the moves history in params, which LOADER.StoreSession saves when the page unloads.
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB };
+        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, level: this.level };
     }
 
     IsLive() {

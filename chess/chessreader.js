@@ -152,7 +152,8 @@ class ChessReader {
 
         let move = null;
         try {
-            move = chess.ParseAiMove(ChessAi(chess.GetCurrentFen(), 1, chess.positions.join(","))); //as the ai plays, see Chess.PlayAiMove
+            //at the top level, whatever the game's: the engine at its best, to compare
+            move = chess.ParseAiMove(ChessAi(chess.GetCurrentFen(), Chess.LEVEL_MAX, chess.positions.join(",")));
         }
         catch (ex) {
             console.error(ex);

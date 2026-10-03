@@ -55,7 +55,6 @@ const (
 	infinity  = 2000000
 
 	deltaMargin  = 200 //largest positional swing a capture is expected to add on top of the captured material
-	nearEqual    = 15  //root moves this close to the best are picked from at random, with all pieces on the board
 	endgamePhase = 8   //from this game phase down there is no random pick, see calculate
 
 	//the search runs on the browser's main thread, so it must stay short in any position
@@ -909,11 +908,21 @@ func pickMove(moves []Move, order []int32, i int) {
 	order[i], order[best] = order[best], order[i]
 }
 
+// The difficulty levels, 1 to 5: the search depth, and the margin of the random pick, see calculate.
+// Root moves this close to the best are picked from at random, with all pieces on the board: a weak level's mistakes.
+var levels = [...]struct{ depth, margin int }{
+	{1, 150},
+	{2, 80},
+	{3, 40},
+	{4, 15},
+	{5, 0},
+}
+
 // calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
 // so a winning side does not repeat itself, and a losing side takes the repetition.
 // Search stops at the node and time budget, and returns the best move of the last completed depth,
-// or one at random among the moves that score within a margin of it, so the engine doesn't play the same game every time.
-func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
+// or one at random among the moves that score within [nearEqual] of it, so the engine doesn't play the same game every time.
+func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (Move, int) {
 	var s *searcher = &searcher{deadline: time.Now().Add(timeBudget)}
 	var moves []Move = legalMoves(game)
 

@@ -21,7 +21,12 @@ func calc(this js.Value, i []js.Value) (result any) {
 	}()
 
 	var fen string = i[0].String()
-	//var depth string = i[1].String()
+
+	//the difficulty level, 1 to 5, see levels
+	var level int = 4
+	if len(i) > 1 && i[1].Type() == js.TypeNumber {
+		level = min(max(i[1].Int(), 1), len(levels))
+	}
 
 	game, err := loadFen(&fen)
 
@@ -42,7 +47,7 @@ func calc(this js.Value, i []js.Value) (result any) {
 	//var move Move = randomMove(&game)
 	var move, inBook = bookMove(&game)
 	if !inBook {
-		move, _ = calculate(&game, 4, history)
+		move, _ = calculate(&game, levels[level-1].depth, levels[level-1].margin, history)
 	}
 
 	return moveToString(move)
