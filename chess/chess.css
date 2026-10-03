@@ -2,75 +2,105 @@
     position: absolute;
     z-index: 1;
     transition: left .1s;
+    backdrop-filter: blur(2px);
 }
 
-.chess-square {
-    position: absolute;
-    width: 12.5%;
-    height: 12.5%;
-    backdrop-filter: blur(2px);
-    transition: .2s
+.chess-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+/*the svg is in board units, a square is 1x1*/
+
+.chess-square-light {
+    fill: rgba(128,128,128,.8);
+}
+
+.chess-square-dark {
+    fill: rgba(72,72,72,.8);
 }
 
 .chess-lastmove-from {
-    background-image: linear-gradient(color-mix(in srgb, var(--clr-accent) 20%, transparent), color-mix(in srgb, var(--clr-accent) 25%, transparent));
+    fill: color-mix(in srgb, var(--clr-accent) 22%, transparent);
 }
 
 .chess-lastmove-to {
-    background-image: linear-gradient(color-mix(in srgb, var(--clr-accent) 40%, transparent), color-mix(in srgb, var(--clr-accent) 45%, transparent));
+    fill: color-mix(in srgb, var(--clr-accent) 42%, transparent);
 }
 
-.chess-piece {
-    position: absolute;
-    width: 12.5%;
-    height: 12.5%;
-    background-image: var(--piece);
-    background-size: contain;
-    background-repeat: no-repeat;
-    transition: .4s cubic-bezier(.2,.8,.3,1.2);
-    /*cursor: url(openhand.svg) 12 12, auto;*/
-}
-
-.chess-white {
-    filter: invert(1) brightness(.9);
-}
-
-/*glass pieces are always on, independent of the "glass effect" option. .refraction is chromium only, see UI.InstallGlassFilter*/
-.refraction .chess-piece {
-    background-image: none;
-    background-color: rgba(16,16,16,.55);
-    mask: var(--piece) center / contain no-repeat;
-    backdrop-filter: brightness(.7) var(--glass-filter);
-}
-
-.refraction .chess-white {
-    filter: none;
-    background-color: rgba(255,255,255,.45);
-    backdrop-filter: brightness(1.4) var(--glass-filter);
-}
-
-/*.chess-piece:active {
-    cursor: url(closedhand.svg) 12 12, auto;
-}*/
-
-.chess-move-indicator {
-    width: 30%;
-    height: 30%;
-    margin: 35%;
-    background-color: var(--clr-accent);
-    border-radius: 50%;
-
-    animation: chess-fadein .4s;
+.chess-selection {
+    fill: none;
+    stroke: var(--clr-accent);
+    stroke-width: .07;
 }
 
 .chess-coord {
-    position: absolute;
-    width: 20px;
-    height: 24px;
-    font-size: 18px;
+    font-size: .22px;
     font-weight: 600;
-    text-align: center;
-    transition: .4s;
+    transition: opacity .4s;
+    -webkit-user-select: none; user-select: none;
+}
+
+.chess-board-small .chess-coord {
+    opacity: 0;
+}
+
+.chess-piece,
+.chess-piece > .chess-piece-glass use {
+    transition: transform .4s cubic-bezier(.2,.8,.3,1.2);
+}
+
+.chess-piece.chess-dragging,
+.chess-piece.chess-dragging > .chess-piece-glass use {
+    transition: none;
+}
+
+.chess-flipping .chess-svg,
+.chess-flipping .chess-piece,
+.chess-flipping .chess-piece > .chess-piece-glass use {
+    transition: transform .6s ease-in-out;
+}
+
+.chess-flipping .chess-coord {
+    opacity: 0;
+    transition: none;
+}
+
+.chess-instant .chess-svg,
+.chess-instant .chess-piece,
+.chess-instant .chess-piece > .chess-piece-glass use {
+    transition: none;
+}
+
+.chess-piece-glass {
+    pointer-events: none;
+}
+
+.chess-piece-hit {
+    fill: transparent;
+}
+
+.chess-piece-tint {
+    fill: rgba(16,16,16,.55);
+}
+
+.chess-white .chess-piece-tint {
+    fill: rgba(255,255,255,.45);
+}
+
+.chess-move-indicator {
+    fill: var(--clr-accent);
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: chess-fadein .4s;
+}
+
+.chess-capture-indicator {
+    fill: none;
+    stroke: var(--clr-accent);
+    stroke-width: .08;
 }
 
 .chess-sidepanel {

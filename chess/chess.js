@@ -1,9 +1,17 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
-    static REFRACTION_SCALE = 24;
+    static REFRACTION_SCALE = .4;
+    static PIECE_BRIGHTNESS = { w:1.2, b:.6 };
 
+    static instances = 0;
     static pieceMaps = {};
+
+    static CreateSvg(tag, attributes = {}) {
+        const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        for (const name in attributes) element.setAttribute(name, attributes[name]);
+        return element;
+    }
 
     static GetPieceMap(name) {
         if (Chess.pieceMaps[name]) return Chess.pieceMaps[name];
@@ -215,9 +223,9 @@ class Chess extends Window {
         this.board.onmousemove   = event => this.Board_mousemove(event, false);
         this.board.onmouseup     = event => this.Board_mouseup(event, false);
         this.board.onmouseleave  = event => this.Board_mouseleave(event, false);
-        this.board.ontouchmove   = event => this.Board_mousemove(event, true);
-        this.board.ontouchend    = event => this.Board_mouseup(event, true);
-        this.board.ontouchcancel = event => this.Board_mouseleave(event, true);
+        this.board.addEventListener("touchmove",   event => this.Board_mousemove(event, true));
+        this.board.addEventListener("touchend",    event => this.Board_mouseup(event, true));
+        this.board.addEventListener("touchcancel", event => this.Board_mouseleave(event, true));
         
         this.content.appendChild(this.board);
 
@@ -235,15 +243,33 @@ class Chess extends Window {
             lastmove: null
         };
 
+        this.uid = `chess${++Chess.instances}`;
+        this.svg = Chess.CreateSvg("svg", { class:"chess-svg", viewBox:"0 0 8 8" });
+        this.board.appendChild(this.svg);
+
+        this.defs = Chess.CreateSvg("defs");
+        this.boardLayer = Chess.CreateSvg("g", { id:`${this.uid}-board` }); //the pieces refract a copy of this layer
+        this.squaresLayer = Chess.CreateSvg("g");
+        this.highlightsLayer = Chess.CreateSvg("g");
+        this.coordsLayer = Chess.CreateSvg("g");
+        this.indicatorsLayer = Chess.CreateSvg("g");
+        this.piecesLayer = Chess.CreateSvg("g");
+        this.sceneLayer = Chess.CreateSvg("g", { id:`${this.uid}-scene` }); //a moving piece refracts a copy of this, other pieces included
+        this.liftLayer = Chess.CreateSvg("g"); //moving pieces, over the scene and outside it, see LiftPiece
+        this.boardLayer.append(this.squaresLayer, this.highlightsLayer, this.coordsLayer);
+        this.sceneLayer.append(this.boardLayer, this.indicatorsLayer, this.piecesLayer);
+        this.svg.append(this.defs, this.sceneLayer, this.liftLayer);
+
         this.squares = [[], [], [], [], [], [], [], []];
         for (let y = 0; y < 8; y++)
             for (let x = 0; x < 8; x++) {
-                const square = document.createElement("div");
-                square.className = "chess-square";
-                square.style.left = x * 12.5 + "%";
-                square.style.top = y * 12.5 + "%";
-                square.style.backgroundColor = (x + y) % 2 === 0 ? "rgba(128,128,128,.8)" : "rgba(72,72,72,.8)";
-                this.board.appendChild(square);
+                const square = Chess.CreateSvg("rect", {
+                    class : (x + y) % 2 === 0 ? "chess-square chess-square-light" : "chess-square chess-square-dark",
+                    width : 1,
+                    height: 1
+                });
+                square.boardPosition = { x: x, y: y };
+                this.squaresLayer.appendChild(square);
                 this.squares[x][y] = square;
             }
 
@@ -256,25 +282,23 @@ class Chess extends Window {
         this.view = 0;       //index of the shown position in history, the board is inert unless it's the last
         this.isPromotionPending = false;
 
+        //ranks on the left column, files on the bottom row. their text follows the flip, see Layout
+        this.rankLabels = [];
+        this.fileLabels = [];
         for (let i = 0; i < 8; i++) {
-            const coord_f = document.createElement("div");
-            coord_f.className = "chess-coord";
-            coord_f.textContent = 8-i;
-            coord_f.style.color = i % 2 === 0 ? "rgb(84,84,84)" : "rgb(108,108,108)";
-            coord_f.style.left = "0";
-            coord_f.style.top = i * 12.5 + "%";
-            this.board.appendChild(coord_f);
+            const rank = Chess.CreateSvg("text", { class:"chess-coord", x:.06, y:i + .06, "dominant-baseline":"hanging" });
+            rank.style.fill = i % 2 === 0 ? "rgb(84,84,84)" : "rgb(108,108,108)";
+            this.coordsLayer.appendChild(rank);
+            this.rankLabels.push(rank);
 
-            const coord_r = document.createElement("div");
-            coord_r.className = "chess-coord";
-            coord_r.textContent = String.fromCharCode(97 + i);
-            coord_r.style.color = i % 2 === 0 ? "rgb(108,108,108)" : "rgb(84,84,84)";
-            coord_r.style.left = `calc(${(i+1) * 12.5}% - 20px)`;
-            coord_r.style.bottom = "0";
-            coord_r.style.verticalAlign = "bottom";
-            this.board.appendChild(coord_r);
+            const file = Chess.CreateSvg("text", { class:"chess-coord", x:i + .94, y:7.94, "text-anchor":"end" });
+            file.style.fill = i % 2 === 0 ? "rgb(108,108,108)" : "rgb(84,84,84)";
+            this.coordsLayer.appendChild(file);
+            this.fileLabels.push(file);
         }
-        
+
+        this.Layout();
+
         this.sidepanel = document.createElement("div");
         this.sidepanel.className = "chess-sidepanel";
         this.content.appendChild(this.sidepanel);
@@ -550,12 +574,7 @@ class Chess extends Window {
             offset = 0;
         }
 
-        if (min < 400)
-            for (const element of this.board.querySelectorAll(".chess-coord"))
-                element.style.opacity = "0";
-        else
-            for (const element of this.board.querySelectorAll(".chess-coord"))
-                element.style.opacity = "1";
+        this.board.classList.toggle("chess-board-small", min < 400); //hides the coordinates
 
         this.board.style.width = min + "px";
         this.board.style.height = min + "px";
@@ -563,29 +582,136 @@ class Chess extends Window {
         this.board.style.top = (h - min) / 2 + "px";
     }
 
+    //Turns the board by 180deg, with the pieces on it. The pieces counter-turn, so they stay upright.
     FlipBoard() {
-        const lastTransition = this.board.style.transition;
-        
-        let transform = this.isFlipped ? "rotate(0)" : "rotate(180deg)";
-        this.board.style.transition = "0.4s";
-        this.board.style.transform = transform;
-        
-        const pieces = Array.from(this.board.querySelectorAll(".chess-piece"));
-        for (let i = 0; i < pieces.length; i++) {
-            pieces[i].style.transform = transform;
-        }
-        
-        const coord = Array.from(this.board.querySelectorAll(".chess-coord"));
-        for (let i = 0; i < coord.length; i++) {
-            coord[i].style.transform = transform;
-        }
-        
-        this.isFlipped = !this.isFlipped;
+        if (this.selected) return;
 
-        setTimeout(()=>{ this.board.style.transition = lastTransition }, 400);
+        this.isFlipped = !this.isFlipped;
+        const pieces = [...this.piecesLayer.children, ...this.liftLayer.children];
+
+        //at once: everything to its mirrored square and the board turned by 180deg, so nothing has moved on screen yet
+        this.board.classList.add("chess-instant", "chess-flipping");
+        this.Layout(false);
+        for (const piece of pieces) {
+            const d = piece.displayPosition;
+            this.SetPieceDisplayPosition(piece, d.x, d.y, piece.scale, -180);
+        }
+        this.svg.style.transform = "rotate(180deg)";
+        getComputedStyle(this.svg).transform; //the transitions start from here
+
+        //then the board turns back to 0, and each piece the opposite way at the same pace
+        this.board.classList.remove("chess-instant");
+        this.svg.style.transform = "rotate(0deg)";
+        for (const piece of pieces) {
+            const d = piece.displayPosition;
+            this.SetPieceDisplayPosition(piece, d.x, d.y, piece.scale, 0);
+        }
+
+        clearTimeout(this.flipTimer);
+        this.flipTimer = setTimeout(()=> {
+            this.board.classList.remove("chess-flipping"); //the coordinates fade back in
+            this.svg.style.transform = "";
+        }, 650);
     }
 
-    //Sets the game to a fen notation, and shows it on the board.
+    ToDisplay(x, y) {
+        return this.isFlipped ? { x: 7 - x, y: 7 - y } : { x: x, y: y };
+    }
+
+    FromDisplay(x, y) {
+        return this.ToDisplay(x, y); //mirroring is its own inverse
+    }
+
+    //Positions an element of a square (square, highlight or indicator) at board coordinates.
+    PlaceOnSquare(element, x, y, inset = 0) {
+        element.boardPosition = { x: x, y: y };
+        element.inset = inset;
+        const d = this.ToDisplay(x, y);
+        element.setAttribute("x", d.x + inset);
+        element.setAttribute("y", d.y + inset);
+    }
+
+    //Positions everything for the current orientation. The pieces slide there, unless [slide] is false.
+    Layout(slide = true) {
+        for (const element of this.svg.querySelectorAll("rect"))
+            if (element.boardPosition) this.PlaceOnSquare(element, element.boardPosition.x, element.boardPosition.y, element.inset);
+
+        for (const element of this.indicatorsLayer.children) {
+            const d = this.ToDisplay(element.boardPosition.x, element.boardPosition.y);
+            element.setAttribute("cx", d.x + .5);
+            element.setAttribute("cy", d.y + .5);
+        }
+
+        for (let i = 0; i < 8; i++) {
+            this.rankLabels[i].textContent = this.isFlipped ? i + 1 : 8 - i;
+            this.fileLabels[i].textContent = String.fromCharCode(this.isFlipped ? 104 - i : 97 + i);
+        }
+
+        for (const piece of [...this.piecesLayer.children, ...this.liftLayer.children]) { //copied, MovePiece moves them between the layers
+            const p = piece.getAttribute("p");
+            if (slide) {
+                this.MovePiece(piece, parseInt(p[0]), parseInt(p[1]));
+            }
+            else {
+                const d = this.ToDisplay(parseInt(p[0]), parseInt(p[1]));
+                this.SetPieceDisplayPosition(piece, d.x, d.y);
+            }
+        }
+    }
+
+    //Moves a piece to a square, with the move transition. It's lifted while it slides, so it refracts the pieces it passes over.
+    MovePiece(piece, x, y) {
+        piece.setAttribute("p", `${x}${y}`);
+        const d = this.ToDisplay(x, y);
+
+        const from = piece.displayPosition;
+        const isDragging = piece.classList.contains("chess-dragging");
+
+        if (from && (from.x !== d.x || from.y !== d.y || piece.scale !== 1) && !isDragging)
+            this.LiftPiece(piece);
+
+        if (piece.parentNode === this.liftLayer && !isDragging) { //moving, or dropped where it was picked
+            clearTimeout(piece.landTimer);
+            piece.landTimer = setTimeout(()=> this.LandPiece(piece), 450); //after the .4s transition
+        }
+
+        this.SetPieceDisplayPosition(piece, d.x, d.y, 1);
+    }
+
+    SetPieceDisplayPosition(piece, x, y, scale = piece.scale ?? 1, rotation = piece.rotation ?? 0) {
+        piece.displayPosition = { x: x, y: y };
+        piece.scale = scale;
+        piece.rotation = rotation;
+        //in an svg, px are user units: squares. the board copy gets the inverse, so it stays aligned with the board
+        piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px)`;
+        piece.boardCopy.style.transform = `translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
+    }
+
+    LiftPiece(piece) {
+        clearTimeout(piece.landTimer);
+        if (piece.parentNode === this.liftLayer) return;
+
+        this.liftLayer.appendChild(piece);
+        piece.boardCopy.setAttribute("href", `#${this.uid}-scene`);
+        getComputedStyle(piece).transform;
+    }
+
+    LandPiece(piece) {
+        clearTimeout(piece.landTimer);
+        if (piece.parentNode !== this.liftLayer || piece.classList.contains("chess-dragging")) return;
+
+        this.piecesLayer.appendChild(piece);
+        piece.boardCopy.setAttribute("href", `#${this.uid}-board`);
+    }
+
+    ClientToBoard(point) {
+        const rect = this.svg.getBoundingClientRect();
+        return {
+            x: (point.clientX - rect.left) * 8 / rect.width,
+            y: (point.clientY - rect.top) * 8 / rect.height
+        };
+    }
+
     LoadFen(notation) {
         const game = this.ParseFen(notation);
         if (!game) return;
@@ -595,7 +721,6 @@ class Chess extends Window {
         this.positions = [this.PositionKey()];
     }
 
-    //Returns the game object of a fen notation, or null if it's invalid.
     ParseFen(notation) {
         let array = notation.split(" ");
         if (array.length < 4) return null;
@@ -612,8 +737,9 @@ class Chess extends Window {
             lastmove: /^[a-h][1-8][a-h][1-8]$/.test(array[6]) ? array[6] : null //non-standard 7th field
         };
 
-        for (let i = 0; i < 8; i++)
+        for (let i = 0; i < 8; i++) {
             game.placement[i] = [null, null, null, null, null, null, null, null];
+        }
 
         let position = { x: 0, y: 0 };
         for (let i = 0; i < placement.length; i++) {
@@ -641,33 +767,43 @@ class Chess extends Window {
         return game;
     }
 
-    //Replaces the pieces on the board, without changing the game.
     RenderPlacement(placement, lastmove) {
-        for (const element of this.board.querySelectorAll(".chess-piece"))
-            this.board.removeChild(element);
+        this.piecesLayer.textContent = "";
+        this.liftLayer.textContent = "";
 
         for (let y = 0; y < 8; y++)
             for (let x = 0; x < 8; x++)
                 if (placement[x][y] !== null)
                     this.AddPiece(placement[x][y], { x: x, y: y });
 
-        for (let y = 0; y < 8; y++)
-            for (let x = 0; x < 8; x++)
-                this.squares[x][y].style.boxShadow = "none";
-
+        this.ClearSelection();
         this.ClearIndicators();
         this.MarkLastMove(lastmove);
     }
 
-    //Highlights the origin and the destination square of a move.
     MarkLastMove(move) {
-        for (const square of this.board.querySelectorAll(".chess-lastmove-from, .chess-lastmove-to"))
-            square.classList.remove("chess-lastmove-from", "chess-lastmove-to");
+        for (const element of this.highlightsLayer.querySelectorAll(".chess-lastmove-from, .chess-lastmove-to"))
+            element.remove();
 
         if (!move) return;
 
-        this.squares[move.charCodeAt(0) - 97][8 - parseInt(move[1])].classList.add("chess-lastmove-from");
-        this.squares[move.charCodeAt(2) - 97][8 - parseInt(move[3])].classList.add("chess-lastmove-to");
+        const from = Chess.CreateSvg("rect", { class:"chess-lastmove-from", width:1, height:1 });
+        const to = Chess.CreateSvg("rect", { class:"chess-lastmove-to", width:1, height:1 });
+        this.PlaceOnSquare(from, move.charCodeAt(0) - 97, 8 - parseInt(move[1]));
+        this.PlaceOnSquare(to, move.charCodeAt(2) - 97, 8 - parseInt(move[3]));
+        this.highlightsLayer.prepend(from, to); //under the selection
+    }
+
+    SelectSquare(x, y) {
+        this.ClearSelection();
+        const selection = Chess.CreateSvg("rect", { class:"chess-selection", width:.93, height:.93 });
+        this.PlaceOnSquare(selection, x, y, .035);
+        this.highlightsLayer.appendChild(selection);
+    }
+
+    ClearSelection() {
+        for (const element of this.highlightsLayer.querySelectorAll(".chess-selection"))
+            element.remove();
     }
 
     GetCurrentFen() {
@@ -709,38 +845,72 @@ class Chess extends Window {
         if (this.game.lastmove) notaion += " " + this.game.lastmove;
         return notaion;
     }
-    
+
     AddPiece(type, position) {
-        const piece = document.createElement("div");
-        piece.className = type === type.toUpperCase() ? "chess-piece chess-white" : "chess-piece";
+        const isWhite = type === type.toUpperCase();
+        const piece = Chess.CreateSvg("g", { class: isWhite ? "chess-piece chess-white" : "chess-piece" });
 
-        piece.style.left = position.x * 12.5 + "%";
-        piece.style.top = position.y * 12.5 + "%";
+        const hit = Chess.CreateSvg("rect", { class:"chess-piece-hit", width:1, height:1 }); //takes the pointer events
 
-        piece.setAttribute("p", `${position.x}${position.y}`);
+        piece.glass = Chess.CreateSvg("g", { class:"chess-piece-glass" });
+        piece.refraction = Chess.CreateSvg("g");
+        piece.boardCopy = Chess.CreateSvg("use", { href:`#${this.uid}-board` });
+        const tint = Chess.CreateSvg("rect", { class:"chess-piece-tint", width:1, height:1 });
 
-        if (this.isFlipped) piece.style.transform = "rotate(180deg)";
+        piece.refraction.appendChild(piece.boardCopy);
+        piece.glass.append(piece.refraction, tint);
+        piece.append(piece.glass, hit);
 
-        piece.onmousedown = event => this.Piece_mousedown(event, false);
-        piece.ontouchstart = event => this.Piece_mousedown(event, true);
+        piece.onmousedown = event => this.Piece_mousedown(event, false, piece);
+        piece.addEventListener("touchstart", event => this.Piece_mousedown(event, true, piece)); //ontouch* handlers don't fire where touch is off by default, like desktop chrome
 
-        this.board.appendChild(piece);
+        this.piecesLayer.appendChild(piece);
 
-        UI.AttachGlass(piece);
+        this.MovePiece(piece, position.x, position.y);
         this.SetPieceType(piece, type);
     }
 
-    //Sets the image of a piece, and its refraction map for the glass effect.
     SetPieceType(piece, type) {
         const name = Chess.PIECE_NAMES[type.toLowerCase()];
-        //absolute, a relative url in a variable resolves against chess.css where it is used
-        piece.style.setProperty("--piece", `url(${new URL(`chess/${name}.svg`, document.baseURI)})`);
+        const color = piece.classList.contains("chess-white") ? "w" : "b";
         piece.pieceName = name;
 
-        Chess.GetPieceMap(name).then(map=> {
-            if (piece.pieceName !== name) return; //promoted in the meantime
-            UI.SetGlassMap(piece, map, Chess.REFRACTION_SCALE);
+        piece.glass.setAttribute("mask", `url(#${this.GetPieceMask(name)})`);
+        piece.refraction.setAttribute("filter", `url(#${this.GetPieceFilter(name, color)})`);
+    }
+
+    GetPieceMask(name) {
+        const id = `${this.uid}-mask-${name}`;
+        if (this.defs.querySelector(`#${id}`)) return id;
+
+        const mask = Chess.CreateSvg("mask", { id:id, maskUnits:"userSpaceOnUse", x:0, y:0, width:1, height:1, style:"mask-type:alpha" });
+        mask.appendChild(Chess.CreateSvg("image", { href:`chess/${name}.svg`, width:1, height:1 }));
+        this.defs.appendChild(mask);
+        return id;
+    }
+
+    GetPieceFilter(name, color) {
+        const id = `${this.uid}-refract-${name}-${color}`;
+        if (this.defs.querySelector(`#${id}`)) return id;
+
+        const filter = Chess.CreateSvg("filter", {
+            id: id,
+            filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse",
+            x: -.25, y: -.25, width: 1.5, height: 1.5, //room for the displacement to sample around the square
+            "color-interpolation-filters": "sRGB"
         });
+
+        const map = Chess.CreateSvg("feImage", { x:0, y:0, width:1, height:1, preserveAspectRatio:"none", result:"map" });
+        const displacement = Chess.CreateSvg("feDisplacementMap", { in:"SourceGraphic", in2:"map", scale:Chess.REFRACTION_SCALE, xChannelSelector:"R", yChannelSelector:"G" });
+        const brightness = Chess.CreateSvg("feComponentTransfer");
+        for (const channel of ["feFuncR", "feFuncG", "feFuncB"])
+            brightness.appendChild(Chess.CreateSvg(channel, { type:"linear", slope:Chess.PIECE_BRIGHTNESS[color] }));
+
+        filter.append(map, displacement, brightness);
+        this.defs.appendChild(filter);
+
+        Chess.GetPieceMap(name).then(href=> map.setAttribute("href", href));
+        return id;
     }
 
     PlayMove(p0, p1, element) {
@@ -772,7 +942,7 @@ class Chess extends Window {
             isCapture = true;
 
             const captured = findPiece(p1.x, p0.y);
-            if (captured) this.board.removeChild(captured);
+            if (captured) captured.remove();
         }
 
         //castling flags
@@ -793,15 +963,12 @@ class Chess extends Window {
             this.game.placement[rookX0][p0.y] = null;
 
             const rook = findPiece(rookX0, p0.y);
-            if (rook) {
-                rook.style.left = rookX1 * 12.5 + "%";
-                rook.setAttribute("p", `${rookX1}${p0.y}`);
-            }
+            if (rook) this.MovePiece(rook, rookX1, p0.y);
         }
 
         if (this.game.placement[p1.x][p1.y] !== null) { //capture a piece
             const captured = findPiece(p1.x, p1.y);
-            if (captured) this.board.removeChild(captured);
+            if (captured) captured.remove();
             isCapture = true;
         }
 
@@ -818,10 +985,7 @@ class Chess extends Window {
         this.game.placement[p1.x][p1.y] = this.game.placement[p0.x][p0.y];
         this.game.placement[p0.x][p0.y] = null;
         
-        element.style.left = p1.x * 12.5 + "%";
-        element.style.top = p1.y * 12.5 + "%";
-
-        element.setAttribute("p", `${p1.x}${p1.y}`);
+        this.MovePiece(element, p1.x, p1.y);
 
         const isPromotion = this.game.placement[p1.x][p1.y] === "P" && p1.y === 0 ||
                             this.game.placement[p1.x][p1.y] === "p" && p1.y === 7;
@@ -871,11 +1035,7 @@ class Chess extends Window {
 
         this.game.activecolor = this.game.activecolor === "w" ? "b" : "w";
 
-        for (let y = 0; y < 8; y++) {
-            for (let x = 0; x < 8; x++) {
-                this.squares[x][y].style.boxShadow = "none";
-            }
-        }
+        this.ClearSelection();
 
         this.game.lastmove = `${String.fromCharCode(97+p0.x)}${8-p0.y}${String.fromCharCode(97+p1.x)}${8-p1.y}`;
         this.MarkLastMove(this.game.lastmove);
@@ -1368,7 +1528,7 @@ class Chess extends Window {
         return control[kingsPosition.x][kingsPosition.y];
     }
 
-    Piece_mousedown(event, isTouch) {
+    Piece_mousedown(event, isTouch, piece) {
         if (event.buttons !== 1 && !isTouch) {
             this.Board_mouseleave();
             return;
@@ -1378,25 +1538,18 @@ class Chess extends Window {
             return;
         }
 
-        this.selected = event.srcElement;
-        this.selectedPosition = {
-            x: parseFloat(event.srcElement.style.left) * this.board.getBoundingClientRect().width / 100,
-            y: parseFloat(event.srcElement.style.top) * this.board.getBoundingClientRect().height / 100
-        };
+        const p = piece.getAttribute("p");
+        this.file0 = parseInt(p[0]);
+        this.rank0 = parseInt(p[1]);
 
-        this.x0 = isTouch ? event.touches[0].clientX : event.x;
-        this.y0 = isTouch ? event.touches[0].clientY : event.y;
+        const point = this.ClientToBoard(isTouch ? event.touches[0] : event);
+        this.grab = { x: point.x - piece.displayPosition.x, y: point.y - piece.displayPosition.y };
 
-        this.file0 = this.selectedPosition.x * 8 / this.board.getBoundingClientRect().width;
-        this.rank0 = this.selectedPosition.y * 8 / this.board.getBoundingClientRect().height;
-
-        this.selected.style.left = parseFloat(event.srcElement.style.left) * this.board.getBoundingClientRect().width / 100 + "px";
-        this.selected.style.top = parseFloat(event.srcElement.style.top) * this.board.getBoundingClientRect().height / 100 + "px";
-        this.selected.style.zIndex = "1";
-        this.selected.style.transition = "none";
+        this.selected = piece;
+        this.LiftPiece(this.selected); //on top of the other pieces, refracting them
+        this.selected.classList.add("chess-dragging");
 
         this.board.style.cursor = "none";
-
 
         if (this.game.activecolor === "w" && this.playerA === "ai") {
             return;
@@ -1409,28 +1562,31 @@ class Chess extends Window {
         let pieceColor = this.GetPieceColor({x:this.file0, y:this.rank0}, this.game);
         if (pieceColor !== this.game.activecolor) return;
 
-        if (isTouch) this.selected.style.transform = this.isFlipped ? "scale(1.2) rotate(180deg)" : "scale(1.2)";
+        if (isTouch) { //bigger, to be seen around the finger
+            const position = this.selected.displayPosition;
+            this.SetPieceDisplayPosition(this.selected, position.x, position.y, 1.2);
+        }
 
-        if (pieceColor === this.game.activecolor)
-            this.squares[this.file0][this.rank0].style.boxShadow = `inset var(--clr-accent) 0 0 0 ${this.board.getBoundingClientRect().width / 120}px`;
+        this.SelectSquare(this.file0, this.rank0);
 
         this.ClearIndicators();
 
         this.legalMoves = this.GetLegalMoves({ x: this.file0, y: this.rank0 }, this.game);
         for (let i = 0; i < this.legalMoves.length; i++) {
-            const indicator = document.createElement("div");
-            indicator.classList = "chess-move-indicator";
-            this.indicators.push(indicator);
-            this.squares[this.legalMoves[i].x][this.legalMoves[i].y].appendChild(indicator);
+            const move = this.legalMoves[i];
+            const isCapture = this.game.placement[move.x][move.y] !== null ||
+                this.game.placement[this.file0][this.rank0].toLowerCase() === "p" && this.file0 !== move.x; //en passant
 
-            if (this.game.placement[this.legalMoves[i].x][this.legalMoves[i].y] !== null ||
-                this.game.placement[this.file0][this.rank0].toLowerCase() === "p" && this.file0 !== this.legalMoves[i].x) {
-                indicator.style.width  = "70%";
-                indicator.style.height = "70%";
-                indicator.style.margin = "15%";
-                indicator.style.backgroundColor = "transparent";
-                indicator.style.boxShadow = `var(--clr-accent) 0 0 0 ${this.board.getBoundingClientRect().width / 100}px`;
-            }
+            const indicator = Chess.CreateSvg("circle", {
+                class: isCapture ? "chess-move-indicator chess-capture-indicator" : "chess-move-indicator",
+                r: isCapture ? .42 : .15
+            });
+            indicator.boardPosition = { x: move.x, y: move.y };
+            const d = this.ToDisplay(move.x, move.y);
+            indicator.setAttribute("cx", d.x + .5);
+            indicator.setAttribute("cy", d.y + .5);
+            this.indicatorsLayer.appendChild(indicator);
+            this.indicators.push(indicator);
         }
     }
 
@@ -1443,58 +1599,38 @@ class Chess extends Window {
         }
 
         if (this.selected) {
-            let dx = isTouch ? event.touches[0].clientX - this.x0 : event.x - this.x0;
-            let dy = isTouch ? event.touches[0].clientY - this.board.getBoundingClientRect().height / 8 - this.y0 : event.y - this.y0;
+            const point = this.ClientToBoard(isTouch ? event.touches[0] : event);
+            if (isTouch) point.y -= 1; //above the finger
 
-            //the board is rotated by 180deg, so screen movement is inverted in board coordinates
-            if (this.isFlipped) {
-                dx = -dx;
-                dy = -dy;
-            }
+            //in display squares, the piece may hang half a square over the edge
+            const x = Math.max(-.5, Math.min(7.5, point.x - this.grab.x));
+            const y = Math.max(-.5, Math.min(7.5, point.y - this.grab.y));
 
-            let x = this.selectedPosition.x + dx;
-            let y = this.selectedPosition.y + dy;
-
-            x = Math.max(x, -this.board.getBoundingClientRect().width / 16);
-            x = Math.min(x, this.board.getBoundingClientRect().width - this.board.getBoundingClientRect().height / 16);
-            y = Math.max(y, -this.board.getBoundingClientRect().height / 16);
-            y = Math.min(y, this.board.getBoundingClientRect().height - this.board.getBoundingClientRect().height / 16);
-
-            this.selected.style.left = x + "px";
-            this.selected.style.top = y + "px";
+            this.SetPieceDisplayPosition(this.selected, x, y);
         }
     }
 
     Board_mouseup(event, isTouch) {
         if (this.selected) {
-            let x = Math.min(Math.max(parseFloat(this.selected.style.left), 0), this.board.getBoundingClientRect().width);
-            let y = Math.min(Math.max(parseFloat(this.selected.style.top), 0), this.board.getBoundingClientRect().height);
+            const position = this.selected.displayPosition;
+            const target = this.FromDisplay(
+                Math.max(0, Math.min(7, Math.round(position.x))),
+                Math.max(0, Math.min(7, Math.round(position.y)))
+            );
 
-            let file1 = Math.round(x * 8 / this.board.getBoundingClientRect().width);
-            let rank1 = Math.round(y * 8 / this.board.getBoundingClientRect().height);
-            file1 = Math.max(0, Math.min(7, file1));
-            rank1 = Math.max(0, Math.min(7, rank1));
-
-            this.selected.style.transition = ".4s cubic-bezier(.2,.8,.3,1.2)";
-            this.selected.style.transform = this.isFlipped ? "rotate(180deg)" : "none";
-            this.selected.style.zIndex = "0";
-
+            this.selected.classList.remove("chess-dragging");
             this.board.style.cursor = "inherit";
 
-            let isLegal = this.legalMoves.find(move => move.x === file1 && move.y === rank1);
+            let isLegal = this.legalMoves.find(move => move.x === target.x && move.y === target.y);
             if (isLegal) {
-                this.PlayMove({ x: this.file0, y: this.rank0 }, { x: file1, y: rank1 }, this.selected);
-
+                this.PlayMove({ x: this.file0, y: this.rank0 }, { x: target.x, y: target.y }, this.selected);
             }
             else { //undo
-                this.selected.style.left = this.file0 * 12.5 + "%";
-                this.selected.style.top = this.rank0 * 12.5 + "%";
+                this.MovePiece(this.selected, this.file0, this.rank0);
                 //Chess.PlaySound("illegal");
             }
-            
-            if (this.GetPieceColor({x:this.file0, y:this.rank0}, this.game) === this.game.activecolor)
-                this.squares[this.file0][this.rank0].style.boxShadow = "none";
 
+            this.ClearSelection();
             this.legalMoves = [];
         }
 
@@ -1505,17 +1641,11 @@ class Chess extends Window {
     Board_mouseleave(event, isTouch) {
         if (!this.selected) return;
 
-        this.selected.style.transition = ".4s cubic-bezier(.2,.8,.3,1.2)";
-        this.selected.style.left = this.selectedPosition.x * 100 / this.board.getBoundingClientRect().width + "%";
-        this.selected.style.top = this.selectedPosition.y * 100 / this.board.getBoundingClientRect().height + "%";
-        this.selected.style.transform = this.isFlipped ? "rotate(180deg)" : "none";
-        this.selected.style.zIndex = "0";
-        this.selected.style.cursor = "inherit";
+        this.selected.classList.remove("chess-dragging");
+        this.MovePiece(this.selected, this.file0, this.rank0);
         this.selected = null;
 
-        if (this.GetPieceColor({x:this.file0, y:this.rank0}, this.game) === this.game.activecolor)
-            this.squares[this.file0][this.rank0].style.boxShadow = "none";
-
+        this.ClearSelection();
         this.board.style.cursor = "inherit";
 
         this.legalMoves = [];
