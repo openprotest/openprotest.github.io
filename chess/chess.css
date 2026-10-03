@@ -267,7 +267,7 @@
 
 .chess-readpreview {
     position: absolute;
-    z-index: 3;
+    z-index: 1;
     right: 0;
     top: 52px;
     width: 250px;

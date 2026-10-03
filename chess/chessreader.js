@@ -36,7 +36,7 @@ class ChessReader {
         this.hintText = document.createElement("div");
         this.sideButton = document.createElement("div");
         this.sideButton.className = "chess-readside";
-        this.sideButton.onclick = ()=> this.SetHintSide(this.hintSide === "w" ? "b" : "w");
+        this.sideButton.onclick = ()=> this.SwitchSide();
         this.preview.append(this.canvas, this.status, this.hintText, this.sideButton);
         this.chess.content.appendChild(this.preview);
         this.chess.readButton.classList.add("chess-active");
@@ -116,6 +116,8 @@ class ChessReader {
         const imported = chess.ImportFen(fen);
         this.status.textContent = imported.error ? imported.error : "";
         if (imported.error || imported.fen === this.fen) return;
+        if (this.isSwitched && imported.fen.split(" ")[0] === this.fen.split(" ")[0]) return; //switched by hand, see SwitchSide
+        this.isSwitched = false;
 
         this.fen = imported.fen;
         chess.NewGame(reading.flipped ? "b" : "w", imported.fen); //the ai waits, see Chess.PlayAiMove
@@ -124,7 +126,21 @@ class ChessReader {
         else this.SetHintSide(reading.flipped ? "b" : "w");
     }
 
-    //The side the engine finds moves for, picked on the preview.
+    //The other side moves, and the engine finds its move. Kept until the next position read.
+    SwitchSide() {
+        const side = this.hintSide === "w" ? "b" : "w";
+        if (this.fen) {
+            const fields = this.fen.split(" ");
+            fields[1] = side;
+            fields[3] = "-";
+            this.fen = fields.join(" ");
+            this.isSwitched = true;
+            this.chess.NewGame(this.chess.GetPlayerSide(), this.fen);
+        }
+        this.SetHintSide(side);
+    }
+
+    //The side the engine finds moves for.
     SetHintSide(side) {
         this.hintSide = side;
         this.sideButton.style.backgroundImage = side === "w" ? "url(chess/king-light.svg)" : "url(chess/king.svg)";
@@ -152,7 +168,6 @@ class ChessReader {
 
         let move = null;
         try {
-            //at the top level, whatever the game's: the engine at its best, to compare
             move = chess.ParseAiMove(ChessAi(chess.GetCurrentFen(), Chess.LEVEL_MAX, chess.positions.join(",")));
         }
         catch (ex) {

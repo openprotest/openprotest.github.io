@@ -326,7 +326,7 @@ class Chess extends Window {
         const fenButton = this.CreateMenuButton("Copy FEN", "url(mono/copy.svg)");
         fenButton.style.left = "98px";
 
-        const readButton = this.CreateMenuButton("Read mode", "url(mono/screenrecord.svg)");
+        const readButton = this.CreateMenuButton("Screen reader", "url(mono/screenrecord.svg)");
         readButton.style.left = "146px";
         
         this.menubar.append(newButton, flipButton, fenButton, readButton);
@@ -574,7 +574,7 @@ class Chess extends Window {
 
             let aiMove = null;
             try {
-                aiMove = ChessAi(this.GetCurrentFen(), 5, this.positions.join(","));
+                aiMove = ChessAi(this.GetCurrentFen(), this.level, this.positions.join(","));
             }
             catch (ex) {
                 console.error(ex);
