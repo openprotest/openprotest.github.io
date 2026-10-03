@@ -628,6 +628,7 @@ class Chess extends Window {
     }
 
     //Ends the game if it is over, and shows the result. Returns true when over.
+    //While reading, the result is in the moves list and the reader's preview only: the next position read is on its way.
     CheckGameOver() {
         const result = this.GetGameResult();
         if (!result) return false;
@@ -638,6 +639,8 @@ class Chess extends Window {
         divResult.className = "chess-score";
         divResult.textContent = result.score;
         this.moveslist.appendChild(divResult);
+
+        if (this.reader) return true;
 
         const cover = document.createElement("div");
         cover.className = "chess-cover";

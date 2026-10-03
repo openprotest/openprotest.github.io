@@ -1,7 +1,3 @@
-//Read mode of the chess board: reads the position of a board on the screen, from a chess.com window or tab the user shares.
-//While it's on, a frame is read every second, the board follows each new position with the side at the bottom as the
-//player's, and the ai waits. A preview box shows the canvas of the analysis, with what was found on it, and the engine's
-//move for a chosen side, drawn on the board.
 class ChessReader {
     constructor(chess) {
         this.chess = chess;
@@ -141,7 +137,12 @@ class ChessReader {
     UpdateHint() {
         const chess = this.chess;
         this.ClearHint();
-        if (!this.stream || !this.fen || chess.isGameOver) return;
+        if (!this.stream || !this.fen) return;
+
+        if (chess.isGameOver) {
+            this.hintText.textContent = chess.GetGameResult()?.text ?? "";
+            return;
+        }
 
         const name = this.hintSide === "w" ? "White" : "Black";
         if (chess.game.activecolor !== this.hintSide) {
@@ -172,7 +173,6 @@ class ChessReader {
         this.chess.hintLayer.textContent = "";
     }
 
-    //An arrow from the center of the move's square to the next, its head ending short of the center.
     DrawHint() {
         const chess = this.chess;
         chess.hintLayer.textContent = "";
@@ -197,15 +197,16 @@ class ChessReader {
 
     //Tuning of the board reading, color distances are the sums of the channels' differences.
     static READ = {
-        minSquare : 16, //px, of a board found
-        minRead   : 30, //px, of a board read: smaller, some pieces look alike
-        edge      : 40, //between two pixels, for the lines between the squares
-        background: 50, //from a square's color, for what's not a piece
-        highlight : 40, //from a square's color, for the last move's squares
-        sameShape : .13, //between the silhouettes of identical pieces, different types measure .2 and more
-        duplicate : .08, //the cost of a type taken by two groups of a color, against a closer template
+        minSquare  : 16, //px, of a board found
+        minRead    : 30, //px, of a board read: smaller, some pieces look alike
+        edge       : 40, //between two pixels, for the lines between the squares
+        background : 50, //from a square's color, for what's not a piece
+        highlight  : 40, //from a square's color, for the last move's squares
+        sameShape  : .13, //between the silhouettes of identical pieces, different types measure .2 and more
+        duplicate  : .08, //the cost of a type taken by two groups of a color, against a closer template
         labelCorner: .34, //of a square, the corner of a coordinate
-        covered   : .6,  //of a side of the board unlike its squares: covered
+        covered    : .6,  //of a side of the board unlike its squares: covered
+        shade      : .8,  //of a square's color, the darkest under the move dots and the capture rings
     };
 
     static readTemplates = null;
@@ -310,6 +311,51 @@ class ChessReader {
         return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
     }
 
+    //Whether a pixel is a darker shade of a square's color, closely: the dots of a selected piece's moves, and the rings around
+    //its captures. A piece's grey isn't, on a colored square: its channels darken alike, the square's don't.
+    static IsShade(pixel, color) {
+        const k = Math.max(ChessReader.READ.shade, Math.min(1, (pixel[0] * color[0] + pixel[1] * color[1] + pixel[2] * color[2]) / (color[0] * color[0] + color[1] * color[1] + color[2] * color[2] || 1)));
+        return ChessReader.ColorDistance(pixel, [k * color[0], k * color[1], k * color[2]]) < ChessReader.READ.background * .4;
+    }
+
+    //Whether an empty square shows a move dot of a selected piece: its center a darker shade of its color.
+    static IsDot(image, left, top, size, color) {
+        const { width, data } = image;
+        const center = [0, 0, 0];
+        for (let y = -1; y <= 1; y++)
+            for (let x = -1; x <= 1; x++) {
+                const i = (Math.floor(top + size / 2) + y) * width * 4 + (Math.floor(left + size / 2) + x) * 4;
+                for (let c = 0; c < 3; c++) center[c] += data[i + c] / 9;
+            }
+        return ChessReader.IsShade(center, color) && ChessReader.ColorDistance(center, color) >= ChessReader.READ.background * .4;
+    }
+
+    //Whether a piece could move from a square to another of a placement, [y][x] from the 8th rank: by how it moves, over
+    //free squares. Whatever is on the two squares, and checks, aside.
+    static CouldMove(placement, letter, from, to) {
+        const dx = to.x - from.x, dy = to.y - from.y, ax = Math.abs(dx), ay = Math.abs(dy);
+        if (ax === 0 && ay === 0) return false;
+        const isWhite = letter === letter.toUpperCase();
+        const isClear = ()=> { //the squares between, on a line
+            for (let k = 1; k < Math.max(ax, ay); k++)
+                if (placement[from.y + Math.sign(dy) * k][from.x + Math.sign(dx) * k]) return false;
+            return true;
+        };
+
+        switch (letter.toLowerCase()) {
+            case "n": return ax * ay === 2;
+            case "k": return Math.max(ax, ay) === 1 || ay === 0 && ax === 2 && from.x === 4 && from.y === (isWhite ? 7 : 0);
+            case "r": return (ax === 0 || ay === 0) && isClear();
+            case "b": return ax === ay && isClear();
+            case "q": return (ax === 0 || ay === 0 || ax === ay) && isClear();
+            case "p": {
+                const forward = isWhite ? -1 : 1;
+                return dy === forward && ax <= 1 || ax === 0 && dy === 2 * forward && from.y === (isWhite ? 6 : 1) && isClear();
+            }
+        }
+        return false;
+    }
+
     //The lines between the squares along one direction: 7 equally spaced peaks of a profile of edges.
     //Returns the candidates {start, size, strength}, the first line found and the spacing.
     static FindLines(profile) {
@@ -408,7 +454,8 @@ class ChessReader {
                     const i = (y * width + x) * 4;
                     const pixel = [data[i], data[i + 1], data[i + 2]];
                     const blend = Math.max(0, Math.min(1, [0, 1, 2].reduce((sum, c)=> sum + (pixel[c] - color[c]) * span[c], 0) / length));
-                    if (ChessReader.ColorDistance(pixel, color) >= ChessReader.READ.background && ChessReader.ColorDistance(pixel, [0, 1, 2].map(c=> color[c] + blend * span[c])) >= ChessReader.READ.background / 2) unlike++;
+                    if (ChessReader.ColorDistance(pixel, color) >= ChessReader.READ.background && !ChessReader.IsShade(pixel, color) &&
+                        ChessReader.ColorDistance(pixel, [0, 1, 2].map(c=> color[c] + blend * span[c])) >= ChessReader.READ.background / 2) unlike++;
                     count++;
                 }
             }
@@ -472,7 +519,8 @@ class ChessReader {
         return Math.max(1, Math.round(size * .03));
     }
 
-    //A square's piece: its silhouette is what a flood fill from the square's edges, over its color, can't reach.
+    //A square's piece: its silhouette is what a flood fill from the square's edges, over its color, can't reach. Over its
+    //darker shades too, a selected piece's move dot or capture ring.
     //The coordinates are in the other square color, passable too in their corners, with their blurred edges: any blend of
     //the two colors, closely. Only there, and only closely: a piece's outline, blurred on a small board, is grey near a blend
     //of them, and the fill would leak in.
@@ -497,7 +545,7 @@ class ChessReader {
             for (let x = 0; x < n; x++) {
                 const i = ((y0 + y) * width + x0 + x) * 4;
                 const pixel = [data[i], data[i + 1], data[i + 2]];
-                if (ChessReader.ColorDistance(pixel, color) < background) {
+                if (ChessReader.ColorDistance(pixel, color) < background || ChessReader.IsShade(pixel, color)) {
                     passable[y * n + x] = 1;
                 }
                 else if (isLabelArea(x, y)) {
@@ -626,7 +674,11 @@ class ChessReader {
                 const k = j * 8 + i, parity = (i + j) % 2;
                 const corners = [i === 0 ? "top-left" : null, j === 7 ? "bottom-right" : null].filter(o=> o); //the coordinates'
                 const region = ChessReader.ReadSquare(image, left + i * size, top + j * size, size, colors[k], bases[1 - parity], corners);
-                squares.push({ i: i, j: j, piece: region.piece, region: region, isHighlighted: ChessReader.ColorDistance(colors[k], bases[parity]) > ChessReader.READ.highlight });
+                squares.push({
+                    i: i, j: j, piece: region.piece, region: region,
+                    isHighlighted: ChessReader.ColorDistance(colors[k], bases[parity]) > ChessReader.READ.highlight,
+                    isDot: !region.piece && ChessReader.IsDot(image, left + i * size, top + j * size, size, colors[k])
+                });
             }
         }
 
@@ -730,11 +782,35 @@ class ChessReader {
         for (const square of squares)
             if (square.letter) { const p = at(square); placement[p.y][p.x] = square.letter; }
 
-        //the side to move, from the last move's squares: the piece on its target moved
+        //the side to move, from the last move's squares: the piece on its target moved. a selected piece highlights its square
+        //too, of the side to move: alone, it's all there is. with a last move, the target of the two is the one its piece could
+        //have come to from the emptied square, or else the one the dots aren't the moves of: the other is selected
         let active = "w", enpassant = "-";
         const highlighted = squares.filter(o=> o.isHighlighted);
-        if (highlighted.length === 2 && !highlighted[0].letter !== !highlighted[1].letter) {
-            const from = at(highlighted.find(o=> !o.letter)), toSquare = highlighted.find(o=> o.letter), to = at(toSquare);
+        const emptied = highlighted.filter(o=> !o.letter), occupied = highlighted.filter(o=> o.letter);
+        let toSquare = null;
+        if (emptied.length === 1 && occupied.length === 1) {
+            toSquare = occupied[0];
+        }
+        else if (emptied.length === 1 && occupied.length === 2 && occupied[0].piece.isWhite !== occupied[1].piece.isWhite) {
+            const from = at(emptied[0]);
+            const [a, b] = occupied.map(o=> ChessReader.CouldMove(placement, o.letter, from, at(o)));
+            if (a !== b) {
+                toSquare = a ? occupied[0] : occupied[1];
+            }
+            else {
+                const dots = squares.filter(o=> o.isDot).map(at);
+                const fit = o=> dots.reduce((sum, d)=> sum + (ChessReader.CouldMove(placement, o.letter, at(o), d) ? 1 : -1), 0); //as selected
+                const [fitA, fitB] = occupied.map(fit);
+                if (fitA !== fitB) toSquare = fitA > fitB ? occupied[1] : occupied[0];
+            }
+        }
+        else if (highlighted.length === 1 && highlighted[0].letter) {
+            active = highlighted[0].piece.isWhite ? "w" : "b";
+        }
+
+        if (toSquare) {
+            const from = at(emptied[0]), to = at(toSquare);
             active = toSquare.piece.isWhite ? "b" : "w";
             if (toSquare.type === "p" && from.x === to.x && Math.abs(from.y - to.y) === 2)
                 enpassant = String.fromCharCode(97 + to.x) + (8 - (from.y + to.y) / 2);
@@ -757,7 +833,7 @@ class ChessReader {
     }
 
     //Draws what a reading found, over the image it read: the grid, the coordinates, the pieces' bounds and letters,
-    //the last move's squares.
+    //the highlighted squares and the move dots.
     static DrawReading(ctx, reading) {
         if (!reading.board) return;
         const { left, top, size } = reading.board;
@@ -788,6 +864,13 @@ class ChessReader {
             if (square.isHighlighted) {
                 ctx.strokeStyle = "rgb(0,160,255)";
                 ctx.strokeRect(x + line * 2, y + line * 2, size - line * 4, size - line * 4);
+            }
+
+            if (square.isDot) {
+                ctx.strokeStyle = "rgb(0,160,255)";
+                ctx.beginPath();
+                ctx.arc(x + size / 2, y + size / 2, size * .2, 0, Math.PI * 2);
+                ctx.stroke();
             }
 
             if (!square.piece) continue;

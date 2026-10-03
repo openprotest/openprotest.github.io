@@ -54,7 +54,9 @@ const (
 	mateScore = 1000000
 	infinity  = 2000000
 
-	deltaMargin = 200 //largest positional swing a capture is expected to add on top of the captured material
+	deltaMargin  = 200 //largest positional swing a capture is expected to add on top of the captured material
+	nearEqual    = 15  //root moves this close to the best are picked from at random, with all pieces on the board
+	endgamePhase = 8   //from this game phase down there is no random pick, see calculate
 
 	//the search runs on the browser's main thread, so it must stay short in any position
 	nodeBudget        = 1000000                 //nodes per move, a few hundred ms natively
@@ -909,7 +911,8 @@ func pickMove(moves []Move, order []int32, i int) {
 
 // calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
 // so a winning side does not repeat itself, and a losing side takes the repetition.
-// Search stops at the node and time budget, and returns the best move of the last completed depth.
+// Search stops at the node and time budget, and returns the best move of the last completed depth,
+// or one at random among the moves that score within a margin of it, so the engine doesn't play the same game every time.
 func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 	var s *searcher = &searcher{deadline: time.Now().Add(timeBudget)}
 	var moves []Move = legalMoves(game)
@@ -921,27 +924,42 @@ func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 		return Move{}, 0
 	}
 
+	//the margin tapers off as pieces come off, and the endgame is played exactly: there, small differences
+	//(pushing a pawn, driving the king to the edge) are what makes progress, and even random ties put a mate off
+	var margin int = max(0, nearEqual*(gamePhase(game)-endgamePhase)/(maxPhase-endgamePhase))
+	var scores []int = make([]int, len(moves))
+	var nearBest []Move //moves of the last completed depth within [margin] of the best
 	var bestScore int = -infinity
 
 	//iterative deepening: the best move of each iteration is searched first in the next, improving cutoffs
 	for d := 1; d <= depth; d++ {
 		var alpha int = -infinity
 		var bestIndex int = -1
+		var searched int = 0
 
 		for i, move := range moves {
 			var next Game = *game
 			next.makeMove(move)
 
+			//the window opens [margin] below the best, so the moves close to it get an exact score
+			var floor int = -infinity
+			if alpha > -infinity {
+				floor = alpha - margin - 1
+			}
+
 			var score int
 			if history[positionKey(&next)] {
 				score = 0 //repetition, a draw
 			} else {
-				score = -s.alphaBeta(&next, d-1, 1, -infinity, -alpha)
+				score = -s.alphaBeta(&next, d-1, 1, -infinity, -floor)
 			}
 
 			if s.aborted {
 				break
 			}
+
+			scores[i] = score
+			searched++
 
 			if score > alpha {
 				alpha = score
@@ -954,13 +972,35 @@ func calculate(game *Game, depth int, history map[string]bool) (Move, int) {
 			break
 		}
 
+		//a move that failed low scores [floor], below alpha-margin, so it's never taken for a near-best
+		nearBest = nearBest[:0]
+		for i := range searched {
+			if scores[i] >= alpha-margin {
+				nearBest = append(nearBest, moves[i])
+			}
+		}
+
 		var best Move = moves[bestIndex]
 		copy(moves[1:bestIndex+1], moves[:bestIndex])
 		moves[0] = best
 		bestScore = alpha
 	}
 
+	//with a mate on the board, the fastest one. a slower mate within the margin could put it off forever
+	if margin > 0 && bestScore > -mateScore+maxPly && bestScore < mateScore-maxPly {
+		return nearBest[rand.Intn(len(nearBest))], bestScore
+	}
+
 	return moves[0], bestScore
+}
+
+// gamePhase is maxPhase with all pieces on the board, down to 0 with only kings and pawns.
+func gamePhase(game *Game) int {
+	var phase int = 0
+	for _, p := range game.board {
+		phase += phaseWeight[pieceType(p)]
+	}
+	return min(phase, maxPhase)
 }
 
 // alphaBeta is a negamax search: scores are always from the perspective of the side to move.
