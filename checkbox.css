@@ -21,7 +21,7 @@ input[type="checkbox"] + label::before {
 	width: 32px;
 	height: 18px;
 	border-radius: 4px;
-	background-color: var(--clr-control);
+	background-color: rgb(96,96,96);
 	transition: .2s;
 }
 
@@ -34,14 +34,18 @@ input[type="checkbox"] + label::after {
 	height: 14px;
 	margin: 2px 2px;
 	border-radius: 4px;
-	background-color: rgb(88,88,88);
+	background-color:  var(--clr-control);
 	box-shadow: rgba(0,0,0,.5) 0 1px 1px;
 	transition: transform .2s, background-color .4s;
 }
 
 input[type="checkbox"] + label:focus::before {
-	animation: outline .3s ease-in;
+	animation: focus-outline .3s ease-in;
 	box-shadow: var(--clr-accent) 0 0 0 3px;
+}
+
+input[type="checkbox"] + label:active::before {
+filter: brightness(85%);
 }
 
 input[type="checkbox"]:checked + label::after {
@@ -59,7 +63,7 @@ input[type="checkbox"]:disabled + label::after {
 }
 
 .check-list {
-	border: var(--clr-control) solid 1.5px;
+	border: rgb(96,96,96) solid 1.5px;
 	overflow-y: scroll;
 }
 

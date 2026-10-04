@@ -16,6 +16,7 @@ type Game struct {
 	castling  byte    // castleWK | castleWQ | castleBK | castleBQ
 	enPassant int8    // square a pawn can capture onto en passant, or -1
 	kings     [2]int8 // king square per color
+	hash      uint64  // Zobrist hash of the position, see computeHash
 }
 
 type PieceType = byte
@@ -56,6 +57,11 @@ const (
 
 	deltaMargin  = 200 //largest positional swing a capture is expected to add on top of the captured material
 	endgamePhase = 8   //from this game phase down there is no random pick, see calculate
+
+	//pruning, see alphaBeta. by remaining depth: the levels of depth 3 and less search every move to its full depth
+	nullMinDepth = 3 //from which a null move is tried
+	lmrMinDepth  = 3 //from which late moves are reduced
+	lmrFullMoves = 3 //legal moves searched to full depth before the reductions start
 
 	//the search runs on the browser's main thread, so it must stay short in any position
 	nodeBudget        = 1000000                 //nodes per move, a few hundred ms natively
@@ -171,6 +177,15 @@ var (
 	castleMask    [64]byte      // castling rights kept when a piece moves from or to [sq]
 )
 
+// Zobrist keys: a position's hash is the XOR of the keys of its pieces on their squares, its castling rights,
+// its en passant file and the side to move. A move updates it with the few keys it changes.
+var (
+	zobristPiece     [16][64]uint64
+	zobristCastling  [16]uint64
+	zobristEnPassant [8]uint64
+	zobristWhite     uint64
+)
+
 func init() {
 	onBoard := func(x, y int) bool { return x >= 0 && x < 8 && y >= 0 && y < 8 }
 
@@ -219,6 +234,20 @@ func init() {
 	castleMask[56] &^= castleWQ            //a1
 	castleMask[60] &^= castleWK | castleWQ //e1
 	castleMask[63] &^= castleWK            //h1
+
+	var r *rand.Rand = rand.New(rand.NewSource(1)) //a fixed seed, so a search can be repeated
+	for p := range zobristPiece {
+		for sq := range 64 {
+			zobristPiece[p][sq] = r.Uint64()
+		}
+	}
+	for i := range zobristCastling {
+		zobristCastling[i] = r.Uint64()
+	}
+	for i := range zobristEnPassant {
+		zobristEnPassant[i] = r.Uint64()
+	}
+	zobristWhite = r.Uint64()
 }
 
 func squareOf(x, y int) int8 { return int8(y*8 + x) }
@@ -331,6 +360,8 @@ func loadFen(fen *string) (Game, error) {
 			}
 		}
 	}
+
+	game.hash = game.computeHash()
 
 	return game, nil
 }
@@ -547,6 +578,15 @@ func (game *Game) makeMove(move Move) {
 	var piece byte = b[move.from]
 	var color PieceColor = pieceColor(piece)
 	var enPassant int8 = game.enPassant
+	var castling byte = game.castling
+
+	var hash uint64 = game.hash ^ zobristPiece[piece][move.from] ^ zobristPiece[piece][move.to] ^ zobristWhite
+	if b[move.to] != 0 {
+		hash ^= zobristPiece[b[move.to]][move.to]
+	}
+	if enPassant >= 0 {
+		hash ^= zobristEnPassant[enPassant%8]
+	}
 
 	b[move.to] = piece
 	b[move.from] = 0
@@ -555,23 +595,35 @@ func (game *Game) makeMove(move Move) {
 	switch pieceType(piece) {
 	case Pawn:
 		switch move.to - move.from {
-		case 16, -16: //en passant flag
-			game.enPassant = (move.from + move.to) / 2
+		case 16, -16: //en passant flag, only when an enemy pawn can take: else it's the same position as without, for the hash
+			var square int8 = (move.from + move.to) / 2
+			for _, t := range pawnCaptures[color][square] {
+				if b[t] == makePiece(Pawn, flipColor(color)) {
+					game.enPassant = square
+					hash ^= zobristEnPassant[square%8]
+					break
+				}
+			}
 		case 7, 9, -7, -9:
 			if move.to == enPassant { //en passant capture
-				b[move.from/8*8+move.to%8] = 0
+				var captured int8 = move.from/8*8 + move.to%8
+				hash ^= zobristPiece[b[captured]][captured]
+				b[captured] = 0
 			}
 		}
 		if move.to < 8 || move.to >= 56 { //promote
 			b[move.to] = makePiece(Queen, color)
+			hash ^= zobristPiece[piece][move.to] ^ zobristPiece[b[move.to]][move.to]
 		}
 
 	case King:
 		game.kings[color] = move.to
 		if move.to-move.from == 2 { //kingside castling
+			hash ^= zobristPiece[b[move.from+3]][move.from+3] ^ zobristPiece[b[move.from+3]][move.from+1]
 			b[move.from+1] = b[move.from+3]
 			b[move.from+3] = 0
 		} else if move.to-move.from == -2 { //queenside castling
+			hash ^= zobristPiece[b[move.from-4]][move.from-4] ^ zobristPiece[b[move.from-4]][move.from-1]
 			b[move.from-1] = b[move.from-4]
 			b[move.from-4] = 0
 		}
@@ -579,6 +631,44 @@ func (game *Game) makeMove(move Move) {
 
 	game.castling &= castleMask[move.from] & castleMask[move.to]
 	game.color = flipColor(game.color)
+	game.hash = hash ^ zobristCastling[castling] ^ zobristCastling[game.castling]
+}
+
+// makeNullMove passes the move to the other side, see alphaBeta.
+func (game *Game) makeNullMove() {
+	if game.enPassant >= 0 {
+		game.hash ^= zobristEnPassant[game.enPassant%8]
+		game.enPassant = -1
+	}
+	game.color = flipColor(game.color)
+	game.hash ^= zobristWhite
+}
+
+// hasPieces reports whether [color] has more than pawns and the king.
+func hasPieces(game *Game, color PieceColor) bool {
+	for _, p := range game.board {
+		if p != 0 && pieceColor(p) == color && pieceType(p) >= Knight && pieceType(p) <= Queen {
+			return true
+		}
+	}
+	return false
+}
+
+// computeHash is the Zobrist hash of the position from scratch. makeMove keeps it up to date as it plays.
+func (game *Game) computeHash() uint64 {
+	var hash uint64 = zobristCastling[game.castling]
+	for sq, p := range game.board {
+		if p != 0 {
+			hash ^= zobristPiece[p][sq]
+		}
+	}
+	if game.enPassant >= 0 {
+		hash ^= zobristEnPassant[game.enPassant%8]
+	}
+	if game.color == White {
+		hash ^= zobristWhite
+	}
+	return hash
 }
 
 // evaluate scores the position from the perspective of the side to move:
@@ -845,6 +935,73 @@ func bookMove(game *Game) (Move, bool) {
 	return Move{}, false
 }
 
+// The transposition table: the scores and best moves of the positions searched, by hash, kept between moves.
+// A position reached again, by another move order or in a deeper iteration, takes its score from the table
+// when the entry was searched as deep, and its best move is searched first otherwise.
+const ttBits = 20 //1M entries of 16 bytes
+
+type ttEntry struct {
+	check      uint32 //the upper half of the hash, the lower one is the index
+	score      int32
+	move       Move
+	depth      int8
+	bound      uint8 //0 for an empty entry
+	generation uint8
+}
+
+const (
+	boundExact uint8 = iota + 1
+	boundLower       //the score is at least this: the search cut off at beta
+	boundUpper       //the score is at most this: no move raised alpha
+)
+
+var (
+	tt         [1 << ttBits]ttEntry
+	generation uint8 //of the running search: older searches' entries are the first to go
+	ttDepth    int   //the depth the table was filled at, see calculate
+)
+
+func probeTT(hash uint64) *ttEntry {
+	var entry *ttEntry = &tt[hash&(1<<ttBits-1)]
+	if entry.bound == 0 || entry.check != uint32(hash>>32) {
+		return nil
+	}
+	return entry
+}
+
+// storeTT keeps a search result, unless the slot holds a deeper one of this search: it saved more work.
+func storeTT(hash uint64, depth, ply, score int, bound uint8, move Move) {
+	var entry *ttEntry = &tt[hash&(1<<ttBits-1)]
+	if entry.generation == generation && int(entry.depth) > depth {
+		return
+	}
+
+	var check uint32 = uint32(hash >> 32)
+	if move == (Move{}) && entry.check == check { //no move raised alpha, keep the one found before
+		move = entry.move
+	}
+
+	//mate scores count from the root, and the position can be met at another ply: kept counting from the position
+	if score > mateScore-maxPly {
+		score += ply
+	} else if score < -mateScore+maxPly {
+		score -= ply
+	}
+
+	*entry = ttEntry{check, int32(score), move, int8(depth), bound, generation}
+}
+
+// ttScore is an entry's score, counting a mate from the root again.
+func ttScore(entry *ttEntry, ply int) int {
+	var score int = int(entry.score)
+	if score > mateScore-maxPly {
+		return score - ply
+	} else if score < -mateScore+maxPly {
+		return score + ply
+	}
+	return score
+}
+
 type searcher struct {
 	moves   [maxPly][maxMoves]Move
 	order   [maxPly][maxMoves]int32
@@ -864,8 +1021,13 @@ func (s *searcher) visit() bool {
 	return !s.aborted
 }
 
-// orderScore ranks captures by most valuable victim / least valuable attacker, then promotions, then killer moves.
-func (s *searcher) orderScore(game *Game, move Move, ply int) int32 {
+// orderScore ranks the table's move first, then captures by most valuable victim / least valuable attacker,
+// then promotions, then killer moves.
+func (s *searcher) orderScore(game *Game, move Move, ply int, hashMove Move) int32 {
+	if move == hashMove {
+		return 1 << 30
+	}
+
 	var attacker PieceType = pieceType(game.board[move.from])
 	var victim PieceType = pieceType(game.board[move.to])
 	var score int32 = 0
@@ -887,11 +1049,11 @@ func (s *searcher) orderScore(game *Game, move Move, ply int) int32 {
 	return score
 }
 
-// scoreMoves fills the move ordering scores for [moves] at [ply].
-func (s *searcher) scoreMoves(game *Game, moves []Move, ply int) []int32 {
+// scoreMoves fills the move ordering scores for [moves] at [ply]. [hashMove] is the table's, or the zero Move.
+func (s *searcher) scoreMoves(game *Game, moves []Move, ply int, hashMove Move) []int32 {
 	var order []int32 = s.order[ply][:len(moves)]
 	for i, move := range moves {
-		order[i] = s.orderScore(game, move, ply)
+		order[i] = s.orderScore(game, move, ply, hashMove)
 	}
 	return order
 }
@@ -908,7 +1070,7 @@ func pickMove(moves []Move, order []int32, i int) {
 	order[i], order[best] = order[best], order[i]
 }
 
-// The difficulty levels, 1 to 5: the search depth, and the margin of the random pick, see calculate.
+// The difficulty levels, 1 to 8, each searching as deep as its number, and the margin of the random pick, see calculate.
 // Root moves this close to the best are picked from at random, with all pieces on the board: a weak level's mistakes.
 var levels = [...]struct{ depth, margin int }{
 	{1, 150},
@@ -916,12 +1078,15 @@ var levels = [...]struct{ depth, margin int }{
 	{3, 40},
 	{4, 15},
 	{5, 0},
+	{6, 0},
+	{7, 0},
+	{8, 0},
 }
 
 // calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
 // so a winning side does not repeat itself, and a losing side takes the repetition.
-// Search stops at the node and time budget, and returns the best move of the last completed depth,
-// or one at random among the moves that score within [nearEqual] of it, so the engine doesn't play the same game every time.
+// Search stops at the node and time budget, and returns the best move of the deepest depth searched (see below for an
+// unfinished one), or one at random among the moves that score within [nearEqual] of it, so the engine doesn't play the same game every time.
 func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (Move, int) {
 	var s *searcher = &searcher{deadline: time.Now().Add(timeBudget)}
 	var moves []Move = legalMoves(game)
@@ -933,11 +1098,18 @@ func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (M
 		return Move{}, 0
 	}
 
+	//the table's entries are as deep as the level that searched them: a lower level using them would play above itself
+	if depth != ttDepth {
+		clear(tt[:])
+		ttDepth = depth
+	}
+	generation++
+
 	//the margin tapers off as pieces come off, and the endgame is played exactly: there, small differences
 	//(pushing a pawn, driving the king to the edge) are what makes progress, and even random ties put a mate off
 	var margin int = max(0, nearEqual*(gamePhase(game)-endgamePhase)/(maxPhase-endgamePhase))
 	var scores []int = make([]int, len(moves))
-	var nearBest []Move //moves of the last completed depth within [margin] of the best
+	var nearBest []Move //moves of the deepest depth searched within [margin] of the best
 	var bestScore int = -infinity
 
 	//iterative deepening: the best move of each iteration is searched first in the next, improving cutoffs
@@ -960,7 +1132,7 @@ func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (M
 			if history[positionKey(&next)] {
 				score = 0 //repetition, a draw
 			} else {
-				score = -s.alphaBeta(&next, d-1, 1, -infinity, -floor)
+				score = -s.alphaBeta(&next, d-1, 1, -infinity, -floor, true)
 			}
 
 			if s.aborted {
@@ -976,8 +1148,9 @@ func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (M
 			}
 		}
 
-		//keep the previous depth's move. on the first depth, the best of the moves searched so far
-		if s.aborted && (d > 1 || bestIndex < 0) {
+		//out of budget before the first move, the previous depth's best, got through: the previous depth's result stays.
+		//after it, the depth's best so far is kept: it scored at least as well as the previous best, at this depth
+		if s.aborted && bestIndex < 0 {
 			break
 		}
 
@@ -993,6 +1166,10 @@ func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (M
 		copy(moves[1:bestIndex+1], moves[:bestIndex])
 		moves[0] = best
 		bestScore = alpha
+
+		if s.aborted {
+			break
+		}
 	}
 
 	//with a mate on the board, the fastest one. a slower mate within the margin could put it off forever
@@ -1013,7 +1190,8 @@ func gamePhase(game *Game) int {
 }
 
 // alphaBeta is a negamax search: scores are always from the perspective of the side to move.
-func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) int {
+// [allowNull] is false right after a null move: a second one would only give the move back.
+func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int, allowNull bool) int {
 	if !s.visit() {
 		return 0
 	}
@@ -1022,11 +1200,45 @@ func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) in
 		return s.quiesce(game, ply, 0, alpha, beta)
 	}
 
-	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], false)
-	var order []int32 = s.scoreMoves(game, moves, ply)
+	var hashMove Move
+	if entry := probeTT(game.hash); entry != nil {
+		hashMove = entry.move
+		if int(entry.depth) >= depth {
+			var score int = ttScore(entry, ply)
+			if entry.bound == boundExact || entry.bound == boundLower && score >= beta || entry.bound == boundUpper && score <= alpha {
+				return min(max(score, alpha), beta) //within the window, as the search fails hard
+			}
+		}
+	}
 
 	var color PieceColor = game.color
+	var inCheck bool = game.inCheck(color)
+
+	//null move pruning: when the side to move could pass, and a shallower search still fails high, a real move would too.
+	//not in check, where passing is illegal, and not with only pawns left: having to move can be what loses there (zugzwang)
+	if allowNull && depth >= nullMinDepth && !inCheck && beta < mateScore-maxPly && hasPieces(game, color) && evaluate(game) >= beta {
+		var reduction int = 2
+		if depth >= 6 {
+			reduction = 3
+		}
+
+		var next Game = *game
+		next.makeNullMove()
+		var score int = -s.alphaBeta(&next, depth-1-reduction, ply+1, -beta, -beta+1, false)
+		if s.aborted {
+			return 0
+		}
+		if score >= beta {
+			return beta
+		}
+	}
+
+	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], false)
+	var order []int32 = s.scoreMoves(game, moves, ply, hashMove)
+
 	var legal int = 0
+	var bestMove Move
+	var bound uint8 = boundUpper
 
 	for i := range moves {
 		pickMove(moves, order, i)
@@ -1039,26 +1251,51 @@ func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int) in
 		}
 		legal++
 
-		var score int = -s.alphaBeta(&next, depth-1, ply+1, -beta, -alpha)
+		//late move reductions: past the first moves, with the table's move, the captures and the killers in front, a quiet
+		//move rarely raises alpha. it gets a shallower null window search first, and the full one only if it does.
+		//not when in check, or when the move gives check: tactics
+		var score int
+		if depth >= lmrMinDepth && legal > lmrFullMoves && order[i] == 0 && !inCheck && !next.inCheck(next.color) {
+			var reduction int = 1
+			if depth >= 5 && legal > 2*lmrFullMoves {
+				reduction = 2
+			}
+
+			score = -s.alphaBeta(&next, depth-1-reduction, ply+1, -alpha-1, -alpha, true)
+			if score > alpha && !s.aborted {
+				score = -s.alphaBeta(&next, depth-1, ply+1, -beta, -alpha, true)
+			}
+		} else {
+			score = -s.alphaBeta(&next, depth-1, ply+1, -beta, -alpha, true)
+		}
+
+		if s.aborted { //the scores are void, keep them out of the table
+			return 0
+		}
+
 		if score > alpha {
 			alpha = score
+			bestMove = move
+			bound = boundExact
 			if alpha >= beta {
 				if game.board[move.to] == 0 && move != s.killers[ply][0] {
 					s.killers[ply][1] = s.killers[ply][0]
 					s.killers[ply][0] = move
 				}
+				storeTT(game.hash, depth, ply, beta, boundLower, move)
 				return beta
 			}
 		}
 	}
 
 	if legal == 0 {
-		if game.inCheck(color) {
+		if inCheck {
 			return -mateScore + ply //prefer faster mates
 		}
 		return 0 //stalemate
 	}
 
+	storeTT(game.hash, depth, ply, alpha, bound, bestMove)
 	return alpha
 }
 
@@ -1091,7 +1328,7 @@ func (s *searcher) quiesce(game *Game, ply, qdepth int, alpha, beta int) int {
 	}
 
 	var moves []Move = pseudoLegalMoves(game, s.moves[ply][:0], !inCheck)
-	var order []int32 = s.scoreMoves(game, moves, ply)
+	var order []int32 = s.scoreMoves(game, moves, ply, Move{})
 	var legal int = 0
 
 	for i := range moves {

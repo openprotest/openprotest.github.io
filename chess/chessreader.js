@@ -7,7 +7,6 @@ class ChessReader {
         this.hint = null;     //the engine's move, see UpdateHint
     }
 
-    //Asks for the window to share, and starts reading it. The board's reader while it's on, see Chess.ReadMode.
     async Start() {
         let stream;
         try {
@@ -62,7 +61,6 @@ class ChessReader {
         if (!chess.isGameOver) chess.PlayAiMove(); //it waited while reading
     }
 
-    //The moves history goes under the preview while reading, and back up after.
     PlaceHistory() {
         this.chess.sidepanel.style.top = this.preview ? `${this.preview.offsetTop + this.preview.offsetHeight + 4}px` : "";
     }
@@ -94,7 +92,6 @@ class ChessReader {
         this.timer = setTimeout(()=> this.ReadFrame(), 1000);
     }
 
-    //Puts a reading on the board, when it's a new position.
     ApplyReading(reading) {
         if (reading.error) {
             this.status.textContent = reading.error;
@@ -126,7 +123,6 @@ class ChessReader {
         else this.SetHintSide(reading.flipped ? "b" : "w");
     }
 
-    //The other side moves, and the engine finds its move. Kept until the next position read.
     SwitchSide() {
         const side = this.hintSide === "w" ? "b" : "w";
         if (this.fen) {
@@ -140,7 +136,6 @@ class ChessReader {
         this.SetHintSide(side);
     }
 
-    //The side the engine finds moves for.
     SetHintSide(side) {
         this.hintSide = side;
         this.sideButton.style.backgroundImage = side === "w" ? "url(chess/king-light.svg)" : "url(chess/king.svg)";
@@ -148,8 +143,6 @@ class ChessReader {
         this.UpdateHint();
     }
 
-    //The engine's move for the chosen side, when it's that side's move: an arrow on the board, and its notation in the preview
-    //to compare with other engines' lines.
     UpdateHint() {
         const chess = this.chess;
         this.ClearHint();
@@ -211,7 +204,6 @@ class ChessReader {
         chess.hintLayer.append(shaft, arrowhead);
     }
 
-    //Tuning of the board reading, color distances are the sums of the channels' differences.
     static READ = {
         minSquare  : 16, //px, of a board found
         minRead    : 30, //px, of a board read: smaller, some pieces look alike
@@ -227,7 +219,6 @@ class ChessReader {
 
     static readTemplates = null;
 
-    //This board's pieces, the shapes the read ones are matched against: their images, and their silhouettes by size.
     static GetReadTemplates() {
         ChessReader.readTemplates ??= Promise.all(Object.entries(Chess.PIECE_NAMES).map(([type, name])=> new Promise(resolve=> {
             const image = new Image();
@@ -237,8 +228,6 @@ class ChessReader {
         return ChessReader.readTemplates;
     }
 
-    //The silhouettes of the templates, drawn at the size of the read squares: a small piece's blurred and blocky outline
-    //is matched against one alike. Returns [{type, shape}].
     static TemplateShapes(templates, n) {
         n = Math.max(12, Math.round(Math.min(n, 96)));
         return templates.map(template=> {
@@ -260,7 +249,6 @@ class ChessReader {
         });
     }
 
-    //Flood fills an n*n area from its border, over the passable pixels. Returns the filled ones.
     static FillOutside(passable, n) {
         const outside = new Uint8Array(n * n);
         const stack = [];
@@ -289,8 +277,6 @@ class ChessReader {
         return outside;
     }
 
-    //A silhouette, scale free: its coverage on a 16*16 grid over its bounds, its height in squares, and its aspect.
-    //The mask is n*n, of a square of the given size.
     static DescribeShape(mask, n, square = n) {
         let left = n, top = n, right = -1, bottom = -1;
         for (let y = 0; y < n; y++)
@@ -327,14 +313,11 @@ class ChessReader {
         return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
     }
 
-    //Whether a pixel is a darker shade of a square's color, closely: the dots of a selected piece's moves, and the rings around
-    //its captures. A piece's grey isn't, on a colored square: its channels darken alike, the square's don't.
     static IsShade(pixel, color) {
         const k = Math.max(ChessReader.READ.shade, Math.min(1, (pixel[0] * color[0] + pixel[1] * color[1] + pixel[2] * color[2]) / (color[0] * color[0] + color[1] * color[1] + color[2] * color[2] || 1)));
         return ChessReader.ColorDistance(pixel, [k * color[0], k * color[1], k * color[2]]) < ChessReader.READ.background * .4;
     }
 
-    //Whether an empty square shows a move dot of a selected piece: its center a darker shade of its color.
     static IsDot(image, left, top, size, color) {
         const { width, data } = image;
         const center = [0, 0, 0];
@@ -635,8 +618,6 @@ class ChessReader {
         return ChessReader.labelTemplates;
     }
 
-    //A coordinate in a corner of a square, read as a shape: the pixels nearer its color than the square's, off the piece.
-    //Returns it, with its box in the image, or null.
     static ReadLabel(image, region, corner, color, labelColor) {
         const { width, data } = image;
         const { x0, y0, n, mask } = region;
@@ -673,9 +654,6 @@ class ChessReader {
         return sum / a.grid.length + Math.abs(a.aspect - b.aspect) * .3;
     }
 
-    //Reads the position of a board in an image. Returns {fen, flipped, board, squares}, or {error}.
-    //The pieces are grouped by their silhouettes, identical pieces look alike, and each group takes a type by its likeness
-    //to the templates, under the rules: a king for each side, no pawns on the first or last rank, a type for one group of a color.
     static ReadBoard(image, templates) {
         const board = ChessReader.FindBoard(image);
         if (!board) return { error: "No chess board found" };
@@ -848,8 +826,6 @@ class ChessReader {
         };
     }
 
-    //Draws what a reading found, over the image it read: the grid, the coordinates, the pieces' bounds and letters,
-    //the highlighted squares and the move dots.
     static DrawReading(ctx, reading) {
         if (!reading.board) return;
         const { left, top, size } = reading.board;

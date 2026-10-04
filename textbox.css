@@ -9,7 +9,7 @@ select {
 	font-size: var(--global-font-size);
 	font-family: var(--global-font-family);
 	outline: 0;
-	border: none;
+	border: 1px solid #777;
 	border-radius: 4px;
 	color: var(--clr-dark);
 	background-color: var(--clr-control);

@@ -37,7 +37,7 @@ class QrGenerator extends Window {
 		},
 		{
 			name  : "Phone",
-			fields: [{key:"number", label:"Number", placeholder:"+357 22 000000"}],
+			fields: [{key:"number", label:"Number"}],
 			encode: f=> {
 				const number = f.number.replace(/[^\d+*#]/g, "");
 				return number.length > 0 ? `tel:${number}` : "";
@@ -78,8 +78,8 @@ class QrGenerator extends Window {
 		{
 			name  : "Map",
 			fields: [
-				{key:"latitude",  label:"Latitude",  placeholder:"35.1856"},
-				{key:"longitude", label:"Longitude", placeholder:"33.3823"},
+				{key:"latitude",  label:"Latitude"},
+				{key:"longitude", label:"Longitude"},
 				{key:"label",     label:"Label",     placeholder:"optional", wide:true}
 			],
 			encode: f=> {

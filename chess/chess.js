@@ -1,10 +1,9 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static LEVEL_DEFAULT = 3;
-    static LEVEL_MAX = 5;
+    static LEVEL_MAX = 8;
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
-    static REFRACTION_SCALE = .25
-    ;
+    static REFRACTION_SCALE = .275;
     static PIECE_TONE = { w:{ slope:1, intercept:.35 }, b:{ slope:.7, intercept:-.12 } }; //of the refracted board: an intercept shifts it without flattening it, as the tint does
     static TILT = 45;          //deg, of the board in perspective
     static PERSPECTIVE = 2.5;  //the viewer's distance, in board sizes
@@ -231,6 +230,10 @@ class Chess extends Window {
         this.board.onmousemove   = event => this.Board_mousemove(event, false);
         this.board.onmouseup     = event => this.Board_mouseup(event, false);
         this.board.onmouseleave  = event => this.Board_mouseleave(event, false);
+        this.board.oncontextmenu = event => { //no menu, a right-click cancels a drag
+            event.preventDefault();
+            this.Board_mouseleave(event, false);
+        };
         this.board.addEventListener("touchmove",   event => this.Board_mousemove(event, true));
         this.board.addEventListener("touchend",    event => this.Board_mouseup(event, true));
         this.board.addEventListener("touchcancel", event => this.Board_mouseleave(event, true));
@@ -534,7 +537,6 @@ class Chess extends Window {
         setTimeout(()=> fenInput.select(), 0);
     }
 
-    //Reads the position of a board on the screen, see ChessReader. Toggles.
     ReadMode() {
         if (this.reader) this.reader.Stop();
         else new ChessReader(this).Start();
@@ -629,7 +631,6 @@ class Chess extends Window {
         return false;
     }
 
-    //Returns the result of the game, or null while it goes on.
     GetGameResult() {
         const color = this.game.activecolor;
 
@@ -653,8 +654,6 @@ class Chess extends Window {
         return null;
     }
 
-    //Ends the game if it is over, and shows the result. Returns true when over.
-    //While reading, the result is in the moves list and the reader's preview only: the next position read is on its way.
     CheckGameOver() {
         const result = this.GetGameResult();
         if (!result) return false;
@@ -695,7 +694,6 @@ class Chess extends Window {
         return true;
     }
 
-    //Starts a game with the player on [side] and the ai on the other, from a fen or the starting position.
     NewGame(side = this.GetPlayerSide(), fen = null) {
         this.isGameOver = false;
         for (const cover of this.content.querySelectorAll(".chess-cover")) cover.remove();
@@ -712,7 +710,6 @@ class Chess extends Window {
         if (!this.CheckGameOver()) this.PlayAiMove(isFlipping ? 900 : 500);
     }
 
-    //Loads a game from params: the moves history, a single fen, or nothing for a new game.
     LoadGame(params) {
         let history;
         if (Array.isArray(params?.history) && params.history.length > 0)
@@ -738,7 +735,6 @@ class Chess extends Window {
         this.SavePosition();
     }
 
-    //Keeps the moves history in params, which LOADER.StoreSession saves when the page unloads.
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
         this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, level: this.level };
@@ -748,7 +744,6 @@ class Chess extends Window {
         return this.view === this.history.length - 1;
     }
 
-    //Shows the position at an index of the history. The board is inert, unless it's the last position.
     ShowMove(index) {
         index = Math.max(0, Math.min(this.history.length - 1, index));
         if (index === this.view) return;
@@ -770,7 +765,6 @@ class Chess extends Window {
         if (this.IsLive()) this.PlayAiMove(); //the ai waits while history is shown
     }
 
-    //Highlights the shown move in the moves list, and scrolls it into view.
     SelectMove() {
         for (const element of this.moveslist.querySelectorAll(".chess-move-selected"))
             element.classList.remove("chess-move-selected");
@@ -871,7 +865,6 @@ class Chess extends Window {
         }, 650);
     }
 
-    //Tilts the board back in perspective, with the pieces standing on it. Or lays it flat again.
     TogglePerspective() {
         if (this.selected) return;
 
@@ -958,14 +951,10 @@ class Chess extends Window {
         piece.scale = scale;
         piece.rotation = rotation;
 
-        //svg content can't turn in 3d, so in perspective a piece stands as a billboard: stretched up from its foot by as much
-        //as the board's projection shortens it, it faces the viewer at its full height. it's innermost, so it stays upright while the board flips
         const foot = Chess.PIECE_FOOT;
         const step = this.is3d ? Chess.PIECE_STEP : 0;
         let stand = 1;
         if (this.is3d) {
-            //the projection shortens the board by cos(tilt)·s² down and by s across, s being how much nearer things grow.
-            //stretched by 1/(cos(tilt)·s) at its foot, a piece keeps its proportions, only scaled by its depth
             const tilt = Chess.TILT * Math.PI / 180, distance = Chess.PERSPECTIVE;
             const turn = -rotation * Math.PI / 180; //the svg turns opposite to the piece, so this is where it's seen while the board flips
             const depth = 4 + (x - 3.5) * Math.sin(turn) + (y - 3.5) * Math.cos(turn) + foot - step - .5; //of the foot, in squares
@@ -979,20 +968,17 @@ class Chess extends Window {
         piece.copy.style.transform = `translate(0px, ${foot}px) scale(1, ${1 / stand}) translate(0px, ${step - foot}px) translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
     }
 
-    //Orders the pieces from the back of the board to the front, so the standing ones cover the squares behind them.
     SortPieces() {
         const pieces = [...this.piecesLayer.children].sort((a, b)=> a.displayPosition.y - b.displayPosition.y);
-        for (let i = 0; i < pieces.length; i++)
-            if (this.piecesLayer.children[i] !== pieces[i]) //moves only what's out of place
+        for (let i = 0; i < pieces.length; i++) {
+            if (this.piecesLayer.children[i] !== pieces[i]) { //moves only what's out of place
                 this.piecesLayer.insertBefore(pieces[i], this.piecesLayer.children[i]);
+            }
+        }
 
         this.UpdateRefractions();
     }
 
-    //In perspective a standing piece covers part of the piece behind it, so with the board it refracts that one too. Which refracts
-    //the one behind it in turn, so a file shows through, at a cost that grows with the file, not the board.
-    //Between resting pieces only, so the references can't loop: a moving piece refracts the whole scene, with the resting pieces in it.
-    //And none while they all turn: a copy is rebuilt on every change of its piece, so it would jump to the end of the transition.
     UpdateRefractions() {
         const isStill = this.is3d && !this.board.classList.contains("chess-flipping") && !this.board.classList.contains("chess-tilting");
         const resting = [...this.piecesLayer.children];
@@ -1027,7 +1013,6 @@ class Chess extends Window {
         this.SortPieces();
     }
 
-    //The board's bounding rect is no use in perspective, it bounds a trapezoid. so from its layout, through the projection.
     ClientToBoard(point) {
         const rect = this.content.getBoundingClientRect();
         const zoom = rect.width / this.content.offsetWidth; //the window scales while it opens
@@ -1058,8 +1043,6 @@ class Chess extends Window {
         this.positions = [this.PositionKey()];
     }
 
-    //Reads a standard fen, as pasted. Returns {fen} in the form the game keeps, or {error} when it's not a position to play.
-    //The game keeps the en passant as the square of the pawn that moved two squares, not the square it passed.
     ImportFen(notation) {
         const fields = notation.trim().split(/\s+/);
         if (fields.length < 4 || fields.length > 6) return { error: "A FEN has 4 to 6 fields, separated by spaces" };
@@ -1103,8 +1086,6 @@ class Chess extends Window {
         return { fen: `${placement} ${active} ${castling} ${passant} ${halfmove} ${fullmove}` };
     }
 
-    //The standard form of a fen the game keeps, the reverse of ImportFen: the en passant as the square the pawn passed,
-    //and without the last move, the game's own 7th field.
     ExportFen(notation) {
         const fields = notation.split(" ").slice(0, 6);
         if (fields[3] !== "-") fields[3] = fields[3][0] + (fields[3][1] === "4" ? "3" : "6");
@@ -1446,7 +1427,6 @@ class Chess extends Window {
         if (!this.CheckGameOver()) this.PlayAiMove();
     }
 
-    //Standard algebraic notation of a move, from the position before it's played. Without promotion and check.
     GetMoveNotation(p0, p1) {
         const piece = this.game.placement[p0.x][p0.y];
         const type = piece.toLowerCase();
@@ -1483,7 +1463,6 @@ class Chess extends Window {
         return type.toUpperCase() + from + capture + target;
     }
 
-    //"+" for check, "#" for checkmate, of the side to move.
     GetCheckNotation() {
         const color = this.game.activecolor;
         if (!this.InCheck(this.game, color)) return "";
@@ -1545,7 +1524,6 @@ class Chess extends Window {
         };
     }
 
-    //Adds the move at an index of the history to the moves list, as rows of: number, white move, black move.
     AddChessNotation(index) {
         const entry = this.history[index];
         const after = entry.fen.split(" ");
@@ -2010,6 +1988,11 @@ class Chess extends Window {
     }
 
     Board_mouseup(event, isTouch) {
+        if (!isTouch && event.button === 2) { //a right-click while dragging cancels, it doesn't drop
+            this.Board_mouseleave(event, isTouch);
+            return;
+        }
+
         if (this.selected) {
             const position = this.selected.displayPosition;
             const target = this.FromDisplay(

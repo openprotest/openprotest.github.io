@@ -22,7 +22,7 @@ func calc(this js.Value, i []js.Value) (result any) {
 
 	var fen string = i[0].String()
 
-	//the difficulty level, 1 to 5, see levels
+	//the difficulty level, 1 to 8, see levels
 	var level int = 4
 	if len(i) > 1 && i[1].Type() == js.TypeNumber {
 		level = min(max(i[1].Int(), 1), len(levels))
