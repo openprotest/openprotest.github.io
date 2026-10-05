@@ -59,7 +59,7 @@ class ChessReader {
 
         const chess = this.chess;
         chess.reader = null;
-        if (!chess.isGameOver) chess.PlayAiMove(); //it waited while reading
+        if (!chess.isGameOver) chess.PlayAiMove(400); //it waited while reading
     }
 
     PlaceHistory() {

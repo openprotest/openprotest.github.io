@@ -108,13 +108,9 @@ class Chess extends Window {
     static noiseBuffer = null;
     static soundBuffers = {}; //name: the promise of its rendered buffer, see RenderSound
 
-    static IsMuted() { //for every chess window, and remembered
-        return localStorage.getItem("chess_mute") === "true";
-    }
-
     static PlaySound(name) {
         const sound = Chess.SOUNDS[name];
-        if (!sound || Chess.IsMuted()) return;
+        if (!sound) return;
 
         try {
             Chess.audioContext ??= new AudioContext();
@@ -342,6 +338,7 @@ class Chess extends Window {
         this.indicators = [];
         this.isFlipped = this.GetPlayerSide() === "b"; //the player's side at the bottom
         this.is3d = this.params?.is3d === true; //flat, unless it's restored as it was left, see SavePosition
+        this.isMuted = this.params?.isMuted === true; //this window's, as the perspective
         this.tilt = this.is3d ? Chess.TILT : 0; //deg, of the board: 0 flat, Chess.TILT in perspective, or where an orbit takes it
         this.spin = 0;     //deg, the board turns on its center while orbiting
         this.orbit = null; //where the drag around the board started, see Orbit_mousedown
@@ -436,15 +433,18 @@ class Chess extends Window {
     }
 
     ToggleMute() {
-        localStorage.setItem("chess_mute", Chess.IsMuted() ? "false" : "true");
-        for (const win of WIN.array) //the other chess windows' buttons too
-            if (win instanceof Chess) win.UpdateMuteButton();
+        this.isMuted = !this.isMuted;
+        this.SavePosition(); //for this window, after a refresh
+        this.UpdateMuteButton();
     }
 
     UpdateMuteButton() {
-        const isMuted = Chess.IsMuted();
-        this.muteButton.style.backgroundImage = isMuted ? "url(mono/mute.svg)" : "url(mono/sound.svg)";
-        this.muteButton.setAttribute("tip-below", isMuted ? "Unmute" : "Mute");
+        this.muteButton.style.backgroundImage = this.isMuted ? "url(mono/mute.svg)" : "url(mono/sound.svg)";
+        this.muteButton.setAttribute("tip-below", this.isMuted ? "Unmute" : "Mute");
+    }
+
+    PlaySound(name) { //unless this window is muted
+        if (!this.isMuted) Chess.PlaySound(name);
     }
 
     CreateMenuButton(name, icon) {
@@ -892,7 +892,7 @@ class Chess extends Window {
 
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB, is3d: this.is3d };
+        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB, is3d: this.is3d, isMuted: this.isMuted };
     }
 
     IsLive() {
@@ -1942,8 +1942,8 @@ class Chess extends Window {
             const check = this.GetCheckNotation();
             san += check;
 
-            if (check) Chess.PlaySound("check");
-            else if (!isSoundPlayed) Chess.PlaySound(isCapture ? "capture" : "move");
+            if (check) this.PlaySound("check");
+            else if (!isSoundPlayed) this.PlaySound(isCapture ? "capture" : "move");
 
             this.positions.push(this.PositionKey());
             this.history.push({ fen: this.GetCurrentFen(), san: san });
@@ -1963,7 +1963,7 @@ class Chess extends Window {
             else {
                 //the position is only final once a piece is picked. the piece has landed, so it sounds now
                 this.isPromotionPending = true;
-                Chess.PlaySound(isCapture ? "capture" : "move");
+                this.PlaySound(isCapture ? "capture" : "move");
                 isSoundPlayed = true;
                 const callback = ()=>{
                     this.isPromotionPending = false;
@@ -1985,7 +1985,7 @@ class Chess extends Window {
 
         record();
 
-        if (!this.CheckGameOver()) this.PlayAiMove();
+        if (!this.CheckGameOver()) this.PlayAiMove(this.playerA === "ai" && this.playerB === "ai" ? 0 : 500);
     }
 
     GetMoveNotation(p0, p1) {
