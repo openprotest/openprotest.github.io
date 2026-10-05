@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"math"
 	"math/bits"
 	"math/rand"
 	"slices"
@@ -67,6 +68,7 @@ const (
 	//the search runs in a worker, the page doesn't wait on it: the budget is how long the player does
 	nodeBudget        = 3000000         //nodes per move, enough for 99.9% of the depth 9 searches measured, about 2s in a browser
 	timeBudget        = 3 * time.Second //backstop for slow devices and browsers
+	topLevelTime      = 3 * time.Second //the top level searches by time alone, see levels
 	checkEvasionDepth = 4               //quiescence plies that search every check evasion
 )
 
@@ -1206,15 +1208,16 @@ type searcher struct {
 	order   [maxPly][maxMoves]int32
 	killers [maxPly][2]Move
 
-	nodes    int
-	deadline time.Time
-	aborted  bool //out of nodes or time, the running iteration is discarded
+	nodes     int
+	nodeLimit int
+	deadline  time.Time
+	aborted   bool //out of nodes or time, the running iteration is discarded
 }
 
 // visit counts a node, and reports false once the search is out of nodes or time.
 func (s *searcher) visit() bool {
 	s.nodes++
-	if s.nodes > nodeBudget || s.nodes&1023 == 0 && time.Now().After(s.deadline) {
+	if s.nodes > s.nodeLimit || s.nodes&1023 == 0 && time.Now().After(s.deadline) {
 		s.aborted = true
 	}
 	return !s.aborted
@@ -1271,6 +1274,7 @@ func pickMove(moves []Move, order []int32, i int) {
 
 // The difficulty levels, 1 to 9, each searching as deep as its number, and the margin of the random pick, see calculate.
 // Root moves this close to the best are picked from at random, with all pieces on the board: a weak level's mistakes.
+// Level 10, the top one, isn't in the table: it searches as deep as it can in topLevelTime.
 var levels = [...]struct{ depth, margin int }{
 	{1, 150},
 	{2, 80},
@@ -1287,8 +1291,14 @@ var levels = [...]struct{ depth, margin int }{
 // so a winning side does not repeat itself, and a losing side takes the repetition.
 // Search stops at the node and time budget, and returns the best move of the deepest depth searched (see below for an
 // unfinished one), or one at random among the moves that score within [nearEqual] of it, so the engine doesn't play the same game every time.
-func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (Move, int) {
-	var s *searcher = &searcher{deadline: time.Now().Add(timeBudget)}
+// With a [moveTime], the search is by time alone: it deepens until the time is out, [depth] is only a cap.
+func calculate(game *Game, depth int, nearEqual int, moveTime time.Duration, history map[string]bool) (Move, int) {
+	var start time.Time = time.Now()
+	var s *searcher = &searcher{nodeLimit: nodeBudget, deadline: start.Add(timeBudget)}
+	if moveTime > 0 {
+		s.nodeLimit = math.MaxInt
+		s.deadline = start.Add(moveTime)
+	}
 	var moves []Move = legalMoves(game)
 
 	if len(moves) == 0 {
@@ -1368,6 +1378,12 @@ func calculate(game *Game, depth int, nearEqual int, history map[string]bool) (M
 		bestScore = alpha
 
 		if s.aborted {
+			break
+		}
+
+		//by time: past half of it, the next depth would take longer than what's left. a forced move, or a mate found,
+		//has nothing more to find
+		if moveTime > 0 && (time.Since(start) > moveTime/2 || len(moves) == 1 || bestScore > mateScore-maxPly) {
 			break
 		}
 	}

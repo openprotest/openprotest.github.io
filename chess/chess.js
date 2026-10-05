@@ -1,7 +1,7 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static LEVEL_DEFAULT = 3;
-    static LEVEL_MAX = 9;
+    static LEVEL_MAX = 10;
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
     static REFRACTION_SCALE = .275;
     static PIECE_TONE = { w:{ slope:1, intercept:.35 }, b:{ slope:.7, intercept:-.12 } }; //of the refracted board: an intercept shifts it without flattening it, as the tint does
@@ -350,8 +350,8 @@ class Chess extends Window {
         this.reader = null; //a ChessReader, while reading
 
         this.engine = null;
-        this.engineRequests = new Map();
-        this.engineRequestId = 0;
+        this.engineRunning = null;
+        this.engineWaiting = null;
         this.aiRequest = null;
 
         this.win.addEventListener("keydown", event=> {
@@ -564,9 +564,10 @@ class Chess extends Window {
 
         this.engine = new Worker("chess/chessworker.js");
         this.engine.onmessage = event=> {
-            const resolve = this.engineRequests.get(event.data.id);
-            this.engineRequests.delete(event.data.id);
-            resolve?.(event.data.move);
+            const running = this.engineRunning;
+            this.engineRunning = null;
+            running?.resolve(event.data.move);
+            this.SendEngineRequest();
         };
         this.engine.onerror = event=> { //the worker failed to load: no answers
             console.error("Chess engine:", event.message);
@@ -577,18 +578,28 @@ class Chess extends Window {
     StopEngine() {
         this.engine?.terminate();
         this.engine = null;
-        for (const resolve of this.engineRequests.values()) resolve(null);
-        this.engineRequests.clear();
+        this.engineRunning?.resolve(null);
+        this.engineWaiting?.resolve(null);
+        this.engineRunning = this.engineWaiting = null;
     }
 
     //Resolves to the engine's move for a position, in its "e2-e4" form, or null. [positions] are the game's, for repetitions.
+    //One search runs at a time, and the top level's takes seconds: a request made meanwhile waits for it, and replaces
+    //one waiting already, which resolves to null. The board has moved on from that position.
     AskEngine(fen, level, positions) {
         this.StartEngine();
-        const id = ++this.engineRequestId;
+        this.engineWaiting?.resolve(null);
         return new Promise(resolve=> {
-            this.engineRequests.set(id, resolve);
-            this.engine.postMessage({ id: id, fen: fen, level: level, positions: positions });
+            this.engineWaiting = { resolve: resolve, message: { fen: fen, level: level, positions: positions } };
+            this.SendEngineRequest();
         });
+    }
+
+    SendEngineRequest() {
+        if (this.engineRunning || !this.engineWaiting) return;
+        this.engineRunning = this.engineWaiting;
+        this.engineWaiting = null;
+        this.engine.postMessage(this.engineRunning.message);
     }
 
     IsAiTurn() {

@@ -22,10 +22,10 @@ func calc(this js.Value, i []js.Value) (result any) {
 
 	var fen string = i[0].String()
 
-	//the difficulty level, 1 to 9, see levels
+	//the difficulty level, 1 to 10, see levels
 	var level int = 4
 	if len(i) > 1 && i[1].Type() == js.TypeNumber {
-		level = min(max(i[1].Int(), 1), len(levels))
+		level = min(max(i[1].Int(), 1), len(levels)+1)
 	}
 
 	game, err := loadFen(&fen)
@@ -46,8 +46,10 @@ func calc(this js.Value, i []js.Value) (result any) {
 
 	//var move Move = randomMove(&game)
 	var move, inBook = bookMove(&game)
-	if !inBook {
-		move, _ = calculate(&game, levels[level-1].depth, levels[level-1].margin, history)
+	if !inBook && level > len(levels) { //the top level, by time
+		move, _ = calculate(&game, maxPly, 0, topLevelTime, history)
+	} else if !inBook {
+		move, _ = calculate(&game, levels[level-1].depth, levels[level-1].margin, 0, history)
 	}
 
 	return moveToString(move)
