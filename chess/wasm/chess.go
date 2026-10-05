@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"math/bits"
 	"math/rand"
 	"slices"
 	"strings"
@@ -84,15 +85,15 @@ var pieceTables = [7][64]int{
 		5, 10, 10, -20, -20, 10, 10, 5,
 		0, 0, 0, 0, 0, 0, 0, 0,
 	},
-	Knight: {
-		-50, -40, -30, -30, -30, -30, -40, -50,
-		-40, -20, 0, 0, 0, 0, -20, -40,
-		-30, 0, 10, 15, 15, 10, 0, -30,
-		-30, 5, 15, 20, 20, 15, 5, -30,
-		-30, 0, 15, 20, 20, 15, 0, -30,
-		-30, 5, 10, 15, 15, 10, 5, -30,
-		-40, -20, 0, 5, 5, 0, -20, -40,
-		-50, -40, -30, -30, -30, -30, -40, -50,
+	Knight: { //at 60%: mobility rewards a central knight too, and the full table developed the knights before the pawns
+		-30, -24, -18, -18, -18, -18, -24, -30,
+		-24, -12, 0, 0, 0, 0, -12, -24,
+		-18, 0, 6, 9, 9, 6, 0, -18,
+		-18, 3, 9, 12, 12, 9, 3, -18,
+		-18, 0, 9, 12, 12, 9, 0, -18,
+		-18, 3, 6, 9, 9, 6, 3, -18,
+		-24, -12, 0, 3, 3, 0, -12, -24,
+		-30, -24, -18, -18, -18, -18, -24, -30,
 	},
 	Bishop: {
 		-20, -10, -10, -10, -10, -10, -10, -20,
@@ -153,8 +154,36 @@ var phaseWeight = [7]int{0, 0, 1, 1, 2, 4, 0}
 
 const maxPhase = 24
 
-// extra endgame bonus for a pawn by how many ranks it has advanced from its start, so pawns get pushed to promotion
-var pawnEndgameBonus = [6]int{0, 5, 15, 30, 50, 80}
+// Pawn structure, see pawnStructure. A passed pawn's bonus is by how many ranks it has advanced from its start,
+// in the middlegame and in the endgame, where it's pushed to promotion.
+var (
+	passedMiddle = [6]int{5, 10, 15, 25, 40, 60}
+	passedEnd    = [6]int{10, 15, 25, 45, 75, 120}
+)
+
+const (
+	isolatedMiddle = -10 //no pawn of its own on the files beside it to defend it
+	isolatedEnd    = -15
+	doubledMiddle  = -10 //for each pawn behind another of its own, on the same file
+	doubledEnd     = -20
+)
+
+// King safety, a middlegame term, see kingShelter. On the king's file and the two beside it, by how many ranks ahead
+// the nearest pawn of its own stands: 1, 2, 3 or more.
+var shelterDistance = [4]int{0, 0, -10, -20}
+
+const (
+	noShelter = -30 //no pawn of its own ahead on the file
+	openFile  = -15 //and no enemy pawn either: an open line for the rooks and the queen
+)
+
+// Mobility, see mobility: for each square a piece can move to, from the count of a typical piece,
+// so an average one scores 0, in the middlegame and in the endgame.
+var (
+	mobilityCenter = [7]int{Knight: 4, Bishop: 6, Rook: 7, Queen: 13}
+	mobilityMiddle = [7]int{Knight: 4, Bishop: 5, Rook: 2, Queen: 1}
+	mobilityEnd    = [7]int{Knight: 4, Bishop: 5, Rook: 4, Queen: 2}
+)
 
 // material lead from which the winning side hunts the lone king (mop-up)
 const mopUpLead = 250
@@ -175,6 +204,17 @@ var (
 	pawnCaptures  [2][64][]int8 // squares a pawn of [color] on [sq] attacks
 	rays          [64][8][]int8 // 0-3 orthogonal, 4-7 diagonal
 	castleMask    [64]byte      // castling rights kept when a piece moves from or to [sq]
+)
+
+// pawn structure masks, a bit per square
+var (
+	passedMask    [2][64]uint64 // the squares ahead of a pawn of [color] on [sq], on its file and the two beside it
+	aheadMask     [2][64]uint64 // the squares ahead of it, on its file
+	adjacentFiles [8]uint64     // the files beside [file]
+	fileMask      [8]uint64
+	knightMask    [64]uint64    // the knight's targets from [sq]
+	rayMask       [64][8]uint64 // the squares of rays[sq][d]
+	rayDown       [8]bool       // whether the squares of rays in direction [d] come in decreasing order
 )
 
 // Zobrist keys: a position's hash is the XOR of the keys of its pieces on their squares, its castling rights,
@@ -217,10 +257,37 @@ func init() {
 		for d, dir := range directions {
 			for i := 1; onBoard(x+dir[0]*i, y+dir[1]*i); i++ {
 				rays[sq][d] = append(rays[sq][d], int8((y+dir[1]*i)*8+x+dir[0]*i))
+				rayMask[sq][d] |= 1 << ((y+dir[1]*i)*8 + x + dir[0]*i)
 			}
+			rayDown[d] = dir[1] < 0 || dir[1] == 0 && dir[0] < 0
+		}
+		for _, t := range knightTargets[sq] {
+			knightMask[sq] |= 1 << t
 		}
 
 		castleMask[sq] = 0b1111
+		fileMask[x] |= 1 << sq
+
+		for t := range 64 { //white pawns move up the board
+			var tx, ty int = t % 8, t / 8
+			if tx < x-1 || tx > x+1 {
+				continue
+			}
+			if tx != x {
+				adjacentFiles[x] |= 1 << t
+			}
+			if ty < y {
+				passedMask[White][sq] |= 1 << t
+				if tx == x {
+					aheadMask[White][sq] |= 1 << t
+				}
+			} else if ty > y {
+				passedMask[Black][sq] |= 1 << t
+				if tx == x {
+					aheadMask[Black][sq] |= 1 << t
+				}
+			}
+		}
 
 		for t := Pawn; t <= Queen; t++ {
 			pieceSquare[makePiece(t, White)][sq] = pieceValue[t] + pieceTables[t][sq]
@@ -672,12 +739,14 @@ func (game *Game) computeHash() uint64 {
 }
 
 // evaluate scores the position from the perspective of the side to move:
-// material and piece-square bonuses, with the king table blended from middlegame to endgame as pieces come off.
+// material and piece-square bonuses, with the king table blended from middlegame to endgame as pieces come off,
+// the pawn structure, the pawns sheltering the kings, and how freely the pieces move.
 func evaluate(game *Game) int {
 	var score int = 0
 	var phase int = 0
 	var material [2]int
-	var pawnAdvance int = 0 //white minus black, in endgame bonus
+	var pawns [2]uint64
+	var occupied [2]uint64
 
 	for sq, p := range game.board {
 		if p == 0 {
@@ -688,12 +757,9 @@ func evaluate(game *Game) int {
 		material[pieceColor(p)] += pieceValue[pieceType(p)]
 
 		if pieceType(p) == Pawn {
-			if pieceColor(p) == White {
-				pawnAdvance += pawnEndgameBonus[6-sq/8]
-			} else {
-				pawnAdvance -= pawnEndgameBonus[sq/8-1]
-			}
+			pawns[pieceColor(p)] |= 1 << sq
 		}
+		occupied[pieceColor(p)] |= 1 << sq
 	}
 
 	if phase > maxPhase { //possible after promotions
@@ -706,7 +772,9 @@ func evaluate(game *Game) int {
 	var kingEnd int = kingEndgameTable[white] - kingEndgameTable[black]
 	score += (kingMiddle*phase + kingEnd*(maxPhase-phase)) / maxPhase
 
-	score += pawnAdvance * (maxPhase - phase) / maxPhase
+	score += pawnStructure(&pawns, phase)
+	score += kingShelter(game, &pawns) * phase / maxPhase
+	score += mobility(game, &pawns, &occupied, phase)
 
 	//mop-up: with a clear material lead, drive the enemy king to the edge and bring the own king closer,
 	//so a won endgame makes progress towards mate instead of shuffling
@@ -720,6 +788,137 @@ func evaluate(game *Game) int {
 		return score
 	}
 	return -score
+}
+
+// pawnStructure scores the pawns of both sides, white minus black, blended from middlegame to endgame by [phase].
+// A passed pawn has no enemy pawn ahead to stop it, on its file or the two beside it: the front one of its file is
+// scored by how far it has come. An isolated pawn can't be defended by another, and a doubled one blocks its own.
+func pawnStructure(pawns *[2]uint64, phase int) int {
+	var middle, end int = 0, 0
+
+	for color := Black; color <= White; color++ {
+		var own, enemy uint64 = pawns[color], pawns[flipColor(color)]
+		var sign int = 1
+		if color == Black {
+			sign = -1
+		}
+
+		for rest := own; rest != 0; rest &= rest - 1 {
+			var sq int = bits.TrailingZeros64(rest)
+
+			if own&aheadMask[color][sq] != 0 {
+				middle += sign * doubledMiddle
+				end += sign * doubledEnd
+			} else if enemy&passedMask[color][sq] == 0 {
+				var advanced int = 6 - sq/8 //ranks from its start
+				if color == Black {
+					advanced = sq/8 - 1
+				}
+				middle += sign * passedMiddle[advanced]
+				end += sign * passedEnd[advanced]
+			}
+
+			if own&adjacentFiles[sq%8] == 0 {
+				middle += sign * isolatedMiddle
+				end += sign * isolatedEnd
+			}
+		}
+	}
+
+	return (middle*phase + end*(maxPhase-phase)) / maxPhase
+}
+
+// mobility scores how freely the pieces move, white minus black, blended from middlegame to endgame by [phase]:
+// the squares each knight, bishop, rook and queen can move to, empty or with an enemy piece,
+// and not attacked by an enemy pawn, where the piece would be lost for a pawn.
+// On bitboards: a ray's squares reach up to its first piece, and the squares past it are its own ray's from there.
+func mobility(game *Game, pawns, occupied *[2]uint64, phase int) int {
+	var pawnAttacks = [2]uint64{ //white pawns take up the board, to the files beside
+		Black: (pawns[Black]&^fileMask[0])<<7 | (pawns[Black]&^fileMask[7])<<9,
+		White: (pawns[White]&^fileMask[0])>>9 | (pawns[White]&^fileMask[7])>>7,
+	}
+	var all uint64 = occupied[White] | occupied[Black]
+	var middle, end int = 0, 0
+
+	for rest := all &^ pawns[White] &^ pawns[Black]; rest != 0; rest &= rest - 1 {
+		var sq int = bits.TrailingZeros64(rest)
+		var t PieceType = pieceType(game.board[sq])
+		if t == King {
+			continue
+		}
+		var color PieceColor = pieceColor(game.board[sq])
+
+		var reach uint64 = knightMask[sq]
+		if t != Knight {
+			reach = 0
+			var first, last int = 0, 8 //the queen's directions, rays 0-3 orthogonal, 4-7 diagonal
+			if t == Bishop {
+				first = 4
+			} else if t == Rook {
+				last = 4
+			}
+			for d := first; d < last; d++ {
+				var ray uint64 = rayMask[sq][d]
+				if blockers := ray & all; blockers != 0 {
+					var blocker int = bits.TrailingZeros64(blockers)
+					if rayDown[d] {
+						blocker = 63 - bits.LeadingZeros64(blockers)
+					}
+					ray &^= rayMask[blocker][d]
+				}
+				reach |= ray
+			}
+		}
+		var count int = bits.OnesCount64(reach &^ occupied[color] &^ pawnAttacks[flipColor(color)])
+
+		var sign int = 1
+		if color == Black {
+			sign = -1
+		}
+		middle += sign * mobilityMiddle[t] * (count - mobilityCenter[t])
+		end += sign * mobilityEnd[t] * (count - mobilityCenter[t])
+	}
+
+	return (middle*phase + end*(maxPhase-phase)) / maxPhase
+}
+
+// kingShelter scores the pawns in front of each king, white minus black. On the king's file and the two beside it,
+// the nearest pawn of its own ahead shields it, the closer the better, and a file without one is a way in.
+// The king table already draws the king to a castled corner: this keeps its pawns in front of it.
+func kingShelter(game *Game, pawns *[2]uint64) int {
+	var score int = 0
+
+	for color := Black; color <= White; color++ {
+		var x, y int = int(game.kings[color] % 8), int(game.kings[color] / 8)
+		var shelter int = 0
+
+		for file := max(0, x-1); file <= min(7, x+1); file++ {
+			var ahead uint64 = pawns[color] & aheadMask[color][y*8+file]
+			if ahead == 0 {
+				shelter += noShelter
+				if (pawns[White]|pawns[Black])&fileMask[file] == 0 {
+					shelter += openFile
+				}
+				continue
+			}
+
+			var distance int //to the nearest: ahead is up the board for white
+			if color == White {
+				distance = y - (63-bits.LeadingZeros64(ahead))/8
+			} else {
+				distance = bits.TrailingZeros64(ahead)/8 - y
+			}
+			shelter += shelterDistance[min(distance, 3)]
+		}
+
+		if color == White {
+			score += shelter
+		} else {
+			score -= shelter
+		}
+	}
+
+	return score
 }
 
 func mopUp(winner, loser int8) int {
