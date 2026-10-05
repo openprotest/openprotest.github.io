@@ -260,10 +260,11 @@ class Chess extends Window {
 
         this.content.appendChild(this.board);
 
-        //the board's sides and the shadow under them, seen in perspective. under the board, as it's placed and tilted, see AfterResize
+        //the board's sides and the shadow under them, seen in perspective. under the board, with its box and transform, see AfterResize
+        //apart from the board: sharing a 3d context with it, chrome draws the board blurry
         this.slab = document.createElement("div");
         this.slab.className = "chess-slab";
-        this.slabTurn = document.createElement("div"); //turns with the svg, see Orient and FlipBoard
+        this.slabTurn = document.createElement("div"); //turns with the svg, the same transform at the same pace, see Orient and FlipBoard
         this.slabTurn.className = "chess-slab-turn";
         for (const name of ["shadow", "front", "right", "back", "left"]) {
             const face = document.createElement("div");
@@ -1104,55 +1105,65 @@ class Chess extends Window {
         if (this.selected || this.orbit) return;
 
         this.isFlipped = !this.isFlipped;
-        const pieces = [...this.piecesLayer.children, ...this.liftLayer.children];
-
-        this.board.classList.add("chess-instant", "chess-flipping");
-        this.UpdateRefractions();
+        this.board.classList.add("chess-steering", "chess-flipping"); //no transitions. the coordinates hide while it turns
         this.Layout(false);
         this.PlaceCaptures(); //they swap, with the sides
-        for (const piece of pieces) {
-            const d = piece.displayPosition;
-            this.SetPieceDisplayPosition(piece, d.x, d.y, piece.scale, -180);
-        }
-        this.svg.style.transform = "rotate(180deg)";
-        this.slabTurn.style.setProperty("--chess-spin", "180deg");
-        getComputedStyle(this.svg).transform; //the transitions start from here
-
-        this.board.classList.remove("chess-instant");
-        this.svg.style.transform = "rotate(0deg)";
-        this.slabTurn.style.setProperty("--chess-spin", "0deg");
-        for (const piece of pieces) {
-            const d = piece.displayPosition;
-            this.SetPieceDisplayPosition(piece, d.x, d.y, piece.scale, 0);
-        }
-
-        clearTimeout(this.flipTimer);
-        this.flipTimer = setTimeout(()=> {
-            this.board.classList.remove("chess-flipping"); //the coordinates fade back in
-            this.svg.style.transform = "";
-            this.SortPieces(); //once they stand still, moving them in the dom would cut their transitions
-        }, 650);
+        this.spin = 180 - (-this.spin % 360 + 360) % 360; //half around, it looks as it did. in -180..180, the short way back
+        this.Orient();
+        this.SettleView(600, ()=> this.board.classList.remove("chess-flipping")); //the coordinates fade back in
     }
 
     TogglePerspective() {
         if (this.selected || this.orbit) return;
 
         this.is3d = !this.is3d;
-        this.tilt = this.is3d ? Chess.TILT : 0;
-        this.SavePosition();
+        this.SavePosition(); //for this window, after a refresh
         this.perspectiveButton.classList.toggle("chess-active", this.is3d);
+        this.SettleView(400); //the pieces stand up as the board tilts
+    }
 
-        this.board.classList.add("chess-tilting"); //the pieces stand up at the pace the board tilts
+    //Eases the view to rest, unturned and tilted as the top view or the perspective, frame by frame. The board, its slab and the
+    //pieces move together, see Orient: with a transition each, the browser runs some composited and some not, and they drift apart.
+    //Restarted, it goes on from where it is, and the one it replaces is done at the end too.
+    SettleView(duration, done = null) {
+        const previous = this.StopView(false);
+        const view = this.content.ownerDocument.defaultView; //popped out, it's another one
+        const spin0 = this.spin, tilt0 = this.tilt, tilt = this.is3d ? Chess.TILT : 0;
+        const start = performance.now();
+
+        const frame = now=> {
+            const t = Math.min(1, Math.max(0, (now - start) / duration));
+            const k = t * t * (3 - 2 * t); //eases in and out
+            this.spin = spin0 * (1 - k);
+            this.tilt = tilt0 + (tilt - tilt0) * k;
+            this.Orient();
+            if (t < 1) {
+                this.SortPieces(); //from the back, as it turns
+                this.settling.id = view.requestAnimationFrame(frame);
+            }
+            else {
+                this.StopView();
+            }
+        };
+
+        this.settling = { view: view, id: view.requestAnimationFrame(frame), done: ()=> { previous?.(); done?.(); } };
+        this.board.classList.add("chess-steering"); //no transitions, see chess.css
         this.UpdateRefractions();
-        this.AfterResize();
-        for (const piece of [...this.piecesLayer.children, ...this.liftLayer.children])
-            this.SetPieceDisplayPosition(piece, piece.displayPosition.x, piece.displayPosition.y);
+    }
 
-        clearTimeout(this.tiltTimer);
-        this.tiltTimer = setTimeout(()=> {
-            this.board.classList.remove("chess-tilting");
-            this.UpdateRefractions();
-        }, 450);
+    //Stops it where it is. Done, unless it's restarted: then the one restarting it takes what's left to do
+    StopView(isDone = true) {
+        if (!this.settling) return null;
+        const { view, id, done } = this.settling;
+        view.cancelAnimationFrame(id);
+        this.settling = null;
+        if (!isDone) return done;
+
+        this.board.getBoundingClientRect(); //the last frame in place first, or the pieces' transitions start from the one before it
+        this.board.classList.remove("chess-steering");
+        done();
+        this.SortPieces(); //and they refract the ones behind them again, see UpdateRefractions
+        return null;
     }
 
     Orbit_mousedown(event) {
@@ -1168,9 +1179,11 @@ class Chess extends Window {
         doc.addEventListener("mousemove", move);
         doc.addEventListener("mouseup", up);
 
+        this.StopView(); //caught on its way back, it goes on from there
         this.orbit = {
             x0: event.clientX,
             y0: event.clientY,
+            spin0: this.spin,
             tilt0: this.tilt,
             isDragged: false, //or it's a click, see Orbit_mouseup
             release: ()=> {
@@ -1179,9 +1192,7 @@ class Chess extends Window {
             }
         };
 
-        clearTimeout(this.tiltTimer);
-        this.board.classList.remove("chess-tilting");
-        this.board.classList.add("chess-orbiting"); //follows the mouse, no transitions
+        this.board.classList.add("chess-steering"); //follows the mouse, no transitions
         this.content.style.cursor = "grabbing";
         this.UpdateRefractions();
     }
@@ -1195,7 +1206,7 @@ class Chess extends Window {
         const dx = event.clientX - this.orbit.x0, dy = event.clientY - this.orbit.y0;
         this.orbit.isDragged ||= Math.abs(dx) + Math.abs(dy) > 3;
         this.content.classList.toggle("chess-orbit-dragged", this.orbit.isDragged); //the captured pieces hide, see chess.css
-        this.spin =((-dx * .5) % 360 + 540) % 360 - 180; //the front follows the mouse. in -180..180, so it goes back the short way
+        this.spin = ((this.orbit.spin0 - dx * .5) % 360 + 540) % 360 - 180; //the front follows the mouse. in -180..180, so it goes back the short way
         this.tilt = Math.max(0, Math.min(Chess.TILT_MAX, this.orbit.tilt0 - dy * .25));
         this.Orient();
         this.SortPieces(); //from the back, as it's turned
@@ -1208,19 +1219,8 @@ class Chess extends Window {
         this.orbit = null;
 
         this.content.classList.remove("chess-orbit-dragged");
-        this.board.classList.remove("chess-orbiting");
-        this.board.classList.add("chess-tilting"); //the pieces go back at the pace the board does
         this.content.style.cursor = "";
-
-        this.spin = 0;
-        this.tilt = this.is3d ? Chess.TILT : 0;
-        this.Orient();
-
-        clearTimeout(this.tiltTimer);
-        this.tiltTimer = setTimeout(()=> {
-            this.board.classList.remove("chess-tilting");
-            this.SortPieces(); //once they stand still, moving them in the dom would cut their transitions
-        }, 450);
+        this.SettleView(400);
     }
 
     Mark_mousedown(event) {
@@ -1356,10 +1356,16 @@ class Chess extends Window {
 
     Orient() {
         this.AfterResize();
-        this.svg.style.transform = this.spin ? `rotate(${this.spin}deg)` : "";
-        this.slabTurn.style.setProperty("--chess-spin", `${this.spin}deg`);
+        this.Turn(this.spin ? `rotate(${this.spin}deg)` : "", this.spin);
         for (const piece of [...this.piecesLayer.children, ...this.liftLayer.children])
             this.SetPieceDisplayPosition(piece, piece.displayPosition.x, piece.displayPosition.y, piece.scale, -this.spin);
+    }
+
+    //The svg and the slab under it, the same way
+    Turn(transform, angle) {
+        this.svg.style.transform = transform;
+        this.slabTurn.style.transform = transform;
+        this.slabTurn.style.setProperty("--chess-spin", `${angle}deg`); //for the sides' light
     }
 
     ToDisplay(x, y) {
@@ -1453,7 +1459,7 @@ class Chess extends Window {
         //in an svg, px are user units: squares. the board copy gets the inverse, so it stays aligned with the board
         piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px) translate(0px, ${foot - step}px) scale(1, ${stand}) skewX(${lean}deg) translate(0px, ${-foot}px)`;
         piece.hit.style.transform = `translate(0px, ${foot}px) skewX(${-lean}deg) scale(1, ${1 / stand}) translate(0px, ${step - foot}px)`; //stays on its square, the one it's picked from
-        piece.reflection.style.fillOpacity = this.tilt / Chess.TILT_MAX; //none in the top view, fading in all the way up. not opacity, see chess.css
+        piece.reflection.style.fillOpacity = this.tilt / Chess.TILT_MAX; //none in the top view, fading in all the way up. paint only: under the perspective, chrome draws an opacity too coarse
         piece.copy.style.transform = `translate(0px, ${foot}px) skewX(${-lean}deg) scale(1, ${1 / stand}) translate(0px, ${step - foot}px) translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
     }
 
@@ -1471,7 +1477,7 @@ class Chess extends Window {
     }
 
     UpdateRefractions() {
-        const isStill = this.is3d && !["chess-flipping", "chess-tilting", "chess-orbiting"].some(o=> this.board.classList.contains(o));
+        const isStill = this.is3d && !this.board.classList.contains("chess-steering");
         const resting = [...this.piecesLayer.children];
 
         for (const piece of [...resting, ...this.liftLayer.children]) {

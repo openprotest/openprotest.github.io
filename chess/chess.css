@@ -7,7 +7,7 @@
 .chess-board {
     position: absolute;
     z-index: 1;
-    transition: left .1s, transform .4s ease-in-out, --chess-rise .4s ease-in-out;
+    transition: left .1s;
 }
 
 .chess-svg {
@@ -16,34 +16,27 @@
     height: 100%;
     overflow: visible;
     box-shadow: #777 0 0 0 4px;
-    border-radius: calc(4px * (1 - var(--chess-rise))); /* square in perspective, on its sides */
+    border-radius: calc(4px * (1 - var(--chess-rise)));
 }
 
-@property --chess-spin { /* of the board, while orbiting or flipping. the slab turns with it, see Chess.Orient */
-    syntax: "<angle>";
-    inherits: true;
-    initial-value: 0deg;
-}
-
-.chess-slab { /* the board's sides and their shadow. under the board, with its box and transform, see Chess.AfterResize */
+.chess-slab {
     position: absolute;
     z-index: 0;
     transform-style: preserve-3d;
     pointer-events: none;
-    transition: left .1s, transform .4s ease-in-out, --chess-rise .4s ease-in-out;
+    transition: left .1s;
 }
 
-.chess-slab-turn { /* out to the frame, half a pixel in, under it, so no seam shows */
+.chess-slab-turn {
     position: absolute;
     inset: -3.5px;
     transform-style: preserve-3d;
-    transform: rotate(var(--chess-spin));
 }
 
 .chess-slab-side { /* hanging back from an edge. lit from the front left, as it turns. flat, edge on and out of sight */
     position: absolute;
     backface-visibility: hidden;
-    background-color: hsl(0 0% calc(30% + 8% * cos(var(--chess-spin) - var(--chess-side) - 30deg)));
+    background-color: hsl(0 0% calc(30% + 8% * cos(var(--chess-spin, 0deg) - var(--chess-side) - 30deg))); /* the board's turn, see Chess.Turn */
 }
 
 .chess-slab-front {
@@ -90,7 +83,7 @@
     background-image: linear-gradient(to left, transparent, rgba(0,0,0,.25));
 }
 
-.chess-slab-shadow { /* on the ground the sides stand on, around them only. paint only, see .chess-piece-reflection */
+.chess-slab-shadow { /* on the ground the sides stand on, around them only. fades with the tilt, see Chess.AfterResize */
     position: absolute;
     inset: 0;
     transform: translateZ(calc(-1 * var(--chess-thickness)));
@@ -140,48 +133,13 @@
     transition: none;
 }
 
-.chess-flipping .chess-svg,
-.chess-flipping .chess-piece,
-.chess-flipping .chess-piece-copy {
-    transition: transform .6s ease-in-out;
-}
-
 .chess-flipping .chess-coord {
     opacity: 0;
     transition: none;
 }
 
-.chess-tilting .chess-svg,
-.chess-tilting .chess-piece,
-.chess-tilting .chess-piece-copy {
-    transition: transform .4s ease-in-out;
-}
-
-.chess-tilting .chess-piece-reflection { /* fades in and out with the perspective. paint only, an opacity transition runs composited, drawn too coarse to see in the board's perspective */
-    transition: fill-opacity .4s ease-in-out;
-}
-
-.chess-flipping ~ .chess-slab .chess-slab-turn {
-    transition: --chess-spin .6s ease-in-out;
-}
-
-.chess-tilting ~ .chess-slab .chess-slab-turn {
-    transition: --chess-spin .4s ease-in-out;
-}
-
-.chess-instant .chess-svg,
-.chess-instant .chess-piece,
-.chess-instant .chess-piece-copy,
-.chess-instant ~ .chess-slab .chess-slab-turn {
-    transition: none;
-}
-
-.chess-orbiting,
-.chess-orbiting .chess-svg,
-.chess-orbiting .chess-piece,
-.chess-orbiting .chess-piece-copy,
-.chess-orbiting ~ .chess-slab,
-.chess-orbiting ~ .chess-slab .chess-slab-turn {
+.chess-steering .chess-piece,
+.chess-steering .chess-piece-copy {
     transition: none;
 }
 
