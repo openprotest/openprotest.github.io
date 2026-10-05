@@ -2,9 +2,9 @@ class ChessReader {
     constructor(chess) {
         this.chess       = chess;
         this.stream      = null;
-        this.fen         = null;      //the last position read
+        this.fen         = null; //the last position read
         this.hintSide    = null; //the side at the bottom of the shared board, until chosen
-        this.hint        = null;     //the engine's move, see UpdateHint
+        this.hint        = null; //the engine's move, see UpdateHint
         this.hintRequest = null; //the engine's pending answer, see UpdateHint
     }
 

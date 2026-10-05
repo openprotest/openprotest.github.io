@@ -1,7 +1,7 @@
 class Chess extends Window {
     static FEN_START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     static LEVEL_DEFAULT = 3;
-    static LEVEL_MAX = 8;
+    static LEVEL_MAX = 9;
     static PIECE_NAMES = { k:"king", q:"queen", r:"rook", n:"knight", b:"bishop", p:"pawn" };
     static REFRACTION_SCALE = .275;
     static PIECE_TONE = { w:{ slope:1, intercept:.35 }, b:{ slope:.7, intercept:-.12 } }; //of the refracted board: an intercept shifts it without flattening it, as the tint does
@@ -557,7 +557,7 @@ class Chess extends Window {
         return this.playerA === "ai" && this.playerB === "ui" ? "b" : "w";
     }
 
-    //The engine runs in a worker, see chessworker.js: a search takes up to most of a second, and the page stays
+    //The engine runs in a worker, see chessworker.js: a search can take a few seconds, and the page stays
     //responsive meanwhile. Requests are answered in order, the ones sent while it loads once it's ready.
     StartEngine() {
         if (this.engine) return;

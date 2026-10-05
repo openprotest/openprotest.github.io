@@ -64,10 +64,10 @@ const (
 	lmrMinDepth  = 3 //from which late moves are reduced
 	lmrFullMoves = 3 //legal moves searched to full depth before the reductions start
 
-	//the search runs on the browser's main thread, so it must stay short in any position
-	nodeBudget        = 1000000                 //nodes per move, a few hundred ms natively
-	timeBudget        = 1500 * time.Millisecond //backstop for slow devices and browsers
-	checkEvasionDepth = 4                       //quiescence plies that search every check evasion
+	//the search runs in a worker, the page doesn't wait on it: the budget is how long the player does
+	nodeBudget        = 3000000         //nodes per move, enough for 99.9% of the depth 9 searches measured, about 2s in a browser
+	timeBudget        = 3 * time.Second //backstop for slow devices and browsers
+	checkEvasionDepth = 4               //quiescence plies that search every check evasion
 )
 
 var pieceValue = [7]int{0, 100, 300, 301, 500, 900, 0}
@@ -1269,7 +1269,7 @@ func pickMove(moves []Move, order []int32, i int) {
 	order[i], order[best] = order[best], order[i]
 }
 
-// The difficulty levels, 1 to 8, each searching as deep as its number, and the margin of the random pick, see calculate.
+// The difficulty levels, 1 to 9, each searching as deep as its number, and the margin of the random pick, see calculate.
 // Root moves this close to the best are picked from at random, with all pieces on the board: a weak level's mistakes.
 var levels = [...]struct{ depth, margin int }{
 	{1, 150},
@@ -1280,6 +1280,7 @@ var levels = [...]struct{ depth, margin int }{
 	{6, 0},
 	{7, 0},
 	{8, 0},
+	{9, 0},
 }
 
 // calculate finds the best move. Moves into a position from [history] (see positionKey) score as a draw,
