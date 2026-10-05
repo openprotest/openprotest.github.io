@@ -104,14 +104,17 @@ class Chess extends Window {
 
     static audioContext = null;
     static noiseBuffer = null;
-    static periodicWaves = {};
+    static soundBuffers = {}; //name: the promise of its rendered buffer, see RenderSound
 
+    //Plays a sound rendered once, as a whole. A click is a few milliseconds of envelopes: scheduled live, ahead of
+    //currentTime, it's silent where that clock lags behind the audio (Firefox), while a buffer started late still plays.
     static PlaySound(name) {
         const sound = Chess.SOUNDS[name];
         if (!sound) return;
 
         try {
             Chess.audioContext ??= new AudioContext();
+            Chess.soundBuffers[name] ??= Chess.RenderSound(sound);
         }
         catch {
             return;
@@ -119,7 +122,19 @@ class Chess extends Window {
 
         const ctx = Chess.audioContext;
         if (ctx.state === "suspended") ctx.resume();
-        const now = ctx.currentTime + 0.005;
+
+        Chess.soundBuffers[name].then(buffer=> {
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start();
+        }).catch(()=> {});
+    }
+
+    //Synthesizes a sound into a buffer, see SOUNDS: half a second, longer than any of them.
+    static RenderSound(sound) {
+        const ctx = new OfflineAudioContext(1, 24000, 48000);
+        const now = 0;
 
         if (!Chess.noiseBuffer) {
             //seeded and at a fixed rate: the clicks are a few samples long and were tuned on this exact noise
@@ -183,21 +198,18 @@ class Chess extends Window {
         if (sound.buzz) {
             const buzz = sound.buzz;
 
-            if (!Chess.periodicWaves[name]) {
-                const anchors = buzz.harmonics;
-                const count = anchors[anchors.length - 1][0];
-                const real = new Float32Array(count + 1), imag = new Float32Array(count + 1);
-                for (let k = 1; k <= count; k++) {
-                    const j = anchors.findIndex(o=> o[0] >= k);
-                    const [k1, v1] = anchors[j], [k0, v0] = anchors[Math.max(0, j - 1)];
-                    real[k] = k1 === k0 ? v1 : v0 + (v1 - v0) * (k - k0) / (k1 - k0); //cosine phase, a pulse like a buzzer
-                }
-                Chess.periodicWaves[name] = ctx.createPeriodicWave(real, imag, { disableNormalization: true });
+            const anchors = buzz.harmonics;
+            const count = anchors[anchors.length - 1][0];
+            const real = new Float32Array(count + 1), imag = new Float32Array(count + 1);
+            for (let k = 1; k <= count; k++) {
+                const j = anchors.findIndex(o=> o[0] >= k);
+                const [k1, v1] = anchors[j], [k0, v0] = anchors[Math.max(0, j - 1)];
+                real[k] = k1 === k0 ? v1 : v0 + (v1 - v0) * (k - k0) / (k1 - k0); //cosine phase, a pulse like a buzzer
             }
 
             const osc = ctx.createOscillator();
             osc.frequency.value = buzz.freq;
-            osc.setPeriodicWave(Chess.periodicWaves[name]);
+            osc.setPeriodicWave(ctx.createPeriodicWave(real, imag, { disableNormalization: true }));
 
             const envelope = ctx.createGain();
             envelope.gain.setValueAtTime(0, now);
@@ -210,6 +222,8 @@ class Chess extends Window {
             osc.start(now);
             osc.stop(now + buzz.attack + buzz.hold + buzz.release + 0.01);
         }
+
+        return ctx.startRendering();
     }
 
     constructor(args) {
