@@ -340,7 +340,7 @@ class Chess extends Window {
         this.legalMoves = [];
         this.indicators = [];
         this.isFlipped = this.GetPlayerSide() === "b"; //the player's side at the bottom
-        this.is3d = localStorage.getItem("chess_3d") === "true"; //as it was left, see TogglePerspective
+        this.is3d = this.params?.is3d === true; //flat, unless it's restored as it was left, see SavePosition
         this.tilt = this.is3d ? Chess.TILT : 0; //deg, of the board: 0 flat, Chess.TILT in perspective, or where an orbit takes it
         this.spin = 0;     //deg, the board turns on its center while orbiting
         this.orbit = null; //where the drag around the board started, see Orbit_mousedown
@@ -891,7 +891,7 @@ class Chess extends Window {
 
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB };
+        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB, is3d: this.is3d };
     }
 
     IsLive() {
@@ -984,10 +984,12 @@ class Chess extends Window {
 
             this.projection = { scale: scale, shift: shift, distance: distance * min, tilt: tilt };
             this.board.style.transform = `translateY(${shift}px) scale(${scale}) perspective(${distance * min}px) rotateX(${this.tilt}deg)`;
+            this.svg.style.rotate = ".01deg"; //unseen. square to the perspective, chrome draws the board and the pieces blurry
         }
         else {
             this.projection = null;
             this.board.style.transform = "";
+            this.svg.style.rotate = "";
         }
 
         this.board.style.setProperty("--chess-rise", Math.min(1, this.tilt / Chess.TILT)); //the pieces' glass gets denser in perspective, see chess.css
@@ -1137,7 +1139,7 @@ class Chess extends Window {
 
         this.is3d = !this.is3d;
         this.tilt = this.is3d ? Chess.TILT : 0;
-        localStorage.setItem("chess_3d", this.is3d); //for every chess window opened next, or after a refresh
+        this.SavePosition();
         this.perspectiveButton.classList.toggle("chess-active", this.is3d);
 
         this.board.classList.add("chess-tilting"); //the pieces stand up at the pace the board tilts
