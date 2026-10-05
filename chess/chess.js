@@ -107,8 +107,6 @@ class Chess extends Window {
     static noiseBuffer = null;
     static soundBuffers = {}; //name: the promise of its rendered buffer, see RenderSound
 
-    //Plays a sound rendered once, as a whole. A click is a few milliseconds of envelopes: scheduled live, ahead of
-    //currentTime, it's silent where that clock lags behind the audio (Firefox), while a buffer started late still plays.
     static PlaySound(name) {
         const sound = Chess.SOUNDS[name];
         if (!sound) return;
@@ -132,7 +130,6 @@ class Chess extends Window {
         }).catch(()=> {});
     }
 
-    //Synthesizes a sound into a buffer, see SOUNDS: half a second, longer than any of them.
     static RenderSound(sound) {
         const ctx = new OfflineAudioContext(1, 24000, 48000);
         const now = 0;
@@ -253,6 +250,7 @@ class Chess extends Window {
         this.board.addEventListener("touchend",    event => this.Board_mouseup(event, true));
         this.board.addEventListener("touchcancel", event => this.Board_mouseleave(event, true));
 
+        this.board.addEventListener("mousedown", event => this.Mark_mousedown(event)); //right-click notes
         this.content.addEventListener("mousedown", event => this.Orbit_mousedown(event)); //around the board
 
         this.content.appendChild(this.board);
@@ -280,14 +278,16 @@ class Chess extends Window {
         this.boardLayer = Chess.CreateSvg("g", { id:`${this.uid}-board` }); //the pieces refract a copy of this layer
         this.squaresLayer = Chess.CreateSvg("g");
         this.highlightsLayer = Chess.CreateSvg("g");
+        this.marksLayer = Chess.CreateSvg("g"); //right-clicked squares, see Mark_mousedown
         this.coordsLayer = Chess.CreateSvg("g");
         this.indicatorsLayer = Chess.CreateSvg("g");
         this.piecesLayer = Chess.CreateSvg("g");
+        this.arrowsLayer = Chess.CreateSvg("g", { class:"chess-arrows-layer" }); //right-dragged, over the pieces
         this.hintLayer = Chess.CreateSvg("g", { class:"chess-hint-layer" }); //the engine's move while reading, see ChessReader.UpdateHint
         this.sceneLayer = Chess.CreateSvg("g", { id:`${this.uid}-scene` }); //a moving piece refracts a copy of this, other pieces included
         this.liftLayer = Chess.CreateSvg("g"); //moving pieces, over the scene and outside it, see LiftPiece
-        this.boardLayer.append(this.squaresLayer, this.highlightsLayer, this.coordsLayer);
-        this.sceneLayer.append(this.boardLayer, this.indicatorsLayer, this.piecesLayer, this.hintLayer);
+        this.boardLayer.append(this.squaresLayer, this.highlightsLayer, this.marksLayer, this.coordsLayer);
+        this.sceneLayer.append(this.boardLayer, this.indicatorsLayer, this.piecesLayer, this.arrowsLayer, this.hintLayer);
         this.svg.append(this.defs, this.sceneLayer, this.liftLayer);
 
         this.squares = [[], [], [], [], [], [], [], []];
@@ -310,6 +310,7 @@ class Chess extends Window {
         this.tilt = 0;     //deg, of the board: 0 flat, Chess.TILT in perspective, or where an orbit takes it
         this.spin = 0;     //deg, the board turns on its center while orbiting
         this.orbit = null; //where the drag around the board started, see Orbit_mousedown
+        this.marking = null; //the right-drag on the board, see Mark_mousedown
         this.pieceCount = 0; //for the ids, a piece refracts the one behind it by id
         this.isGameOver = false;
         this.positions = []; //PositionKey of every position of the game, for repetitions
@@ -577,8 +578,6 @@ class Chess extends Window {
         return this.playerA === "ai" && this.playerB === "ui" ? "b" : "w";
     }
 
-    //The engine runs in a worker, see chessworker.js: a search can take a few seconds, and the page stays
-    //responsive meanwhile. Requests are answered in order, the ones sent while it loads once it's ready.
     StartEngine() {
         if (this.engine) return;
 
@@ -603,10 +602,6 @@ class Chess extends Window {
         this.engineRunning = this.engineWaiting = null;
     }
 
-    //Resolves to the engine's move for a position, in its "e2-e4" form ("e7-e8q" for a promotion), or null.
-    //[positions] are the game's, for repetitions.
-    //One search runs at a time, and the top level's takes seconds: a request made meanwhile waits for it, and replaces
-    //one waiting already, which resolves to null. The board has moved on from that position.
     AskEngine(fen, level, positions) {
         this.StartEngine();
         this.engineWaiting?.resolve(null);
@@ -657,8 +652,6 @@ class Chess extends Window {
         }, delay);
     }
 
-    //Returns {p0, p1, promotion} from the engine's "e2-e4" form, or null if it's not a legal move of the side to move.
-    //A promotion's piece is a letter after the move, "e7-e8n": promotion is "q", "r", "b" or "n" then, and null otherwise.
     ParseAiMove(aiMove) {
         if (typeof aiMove !== "string" || !/^[a-h][1-8]-[a-h][1-8][qrbn]?$/.test(aiMove)) return null;
 
@@ -683,7 +676,6 @@ class Chess extends Window {
         return moves[Math.floor(Math.random() * moves.length)];
     }
 
-    //Piece placement and side to move, the part of the fen that repeats (the engine uses the same form).
     PositionKey() {
         return this.GetCurrentFen().split(" ").slice(0, 2).join(" ");
     }
@@ -952,7 +944,6 @@ class Chess extends Window {
         }, 450);
     }
 
-    //Dragged on the space around the board: across, it turns on its center, up and down, it tilts. Released, it goes back.
     Orbit_mousedown(event) {
         if (event.button !== 0 || event.target !== this.content) return;
         if (this.selected || this.orbit || this.board.classList.contains("chess-flipping")) return;
@@ -970,6 +961,7 @@ class Chess extends Window {
             x0: event.clientX,
             y0: event.clientY,
             tilt0: this.tilt,
+            isDragged: false, //or it's a click, see Orbit_mouseup
             release: ()=> {
                 doc.removeEventListener("mousemove", move);
                 doc.removeEventListener("mouseup", up);
@@ -990,7 +982,8 @@ class Chess extends Window {
         }
 
         const dx = event.clientX - this.orbit.x0, dy = event.clientY - this.orbit.y0;
-        this.spin = ((-dx * .5) % 360 + 540) % 360 - 180; //the front follows the mouse. in -180..180, so it goes back the short way
+        this.orbit.isDragged ||= Math.abs(dx) + Math.abs(dy) > 3;
+        this.spin =((-dx * .5) % 360 + 540) % 360 - 180; //the front follows the mouse. in -180..180, so it goes back the short way
         this.tilt = Math.max(0, Math.min(Chess.TILT_MAX, this.orbit.tilt0 - dy * .25));
         this.Orient();
         this.SortPieces(); //from the back, as it's turned
@@ -998,6 +991,7 @@ class Chess extends Window {
 
     Orbit_mouseup() {
         if (!this.orbit) return;
+        if (!this.orbit.isDragged) this.ClearMarks(); //a click around the board, as one on it
         this.orbit.release();
         this.orbit = null;
 
@@ -1016,7 +1010,137 @@ class Chess extends Window {
         }, 450);
     }
 
-    //the board and its pieces to the current tilt and spin
+    Mark_mousedown(event) {
+        if (event.button === 0) {
+            this.ClearMarks();
+            return;
+        }
+        if (event.button !== 2 || event.buttons !== 2 || this.marking) return; //only the right button, not while a piece is dragged
+
+        const from = this.SquareAt(event);
+        if (!from) return;
+
+        const doc = this.content.ownerDocument; //popped out, it's another one
+        const move = event=> this.Mark_mousemove(event);
+        const up = event=> this.Mark_mouseup(event);
+        doc.addEventListener("mousemove", move);
+        doc.addEventListener("mouseup", up);
+
+        this.marking = {
+            from: from,
+            to: from, //null off the board
+            squareColor: event.ctrlKey ? "orange" : event.altKey ? "blue" : "red",
+            arrowColor: event.ctrlKey ? "red" : event.altKey ? "blue" : "orange",
+            draft: null, //the arrow, while it's drawn
+            release: ()=> {
+                doc.removeEventListener("mousemove", move);
+                doc.removeEventListener("mouseup", up);
+            }
+        };
+    }
+
+    Mark_mousemove(event) {
+        const marking = this.marking;
+        if (!(event.buttons & 2)) { //released outside
+            marking.draft?.remove();
+            marking.release();
+            this.marking = null;
+            return;
+        }
+
+        const to = this.SquareAt(event);
+        if (Chess.IsSameSquare(to, marking.to)) return;
+        marking.to = to;
+
+        marking.draft?.remove();
+        marking.draft = to && !Chess.IsSameSquare(to, marking.from) ? this.CreateArrow(marking.from, to, marking.arrowColor) : null;
+        if (marking.draft) this.arrowsLayer.appendChild(marking.draft);
+    }
+
+    Mark_mouseup(event) {
+        if (event.button !== 2) return;
+
+        const { from, to, squareColor, arrowColor, draft } = this.marking;
+        draft?.remove();
+        this.marking.release();
+        this.marking = null;
+
+        if (!to) return; //let go off the board
+        if (Chess.IsSameSquare(from, to))
+            this.ToggleMark(from, squareColor);
+        else
+            this.ToggleArrow(from, to, arrowColor);
+    }
+
+    ToggleMark(p, color) {
+        const old = [...this.marksLayer.children].find(o=> Chess.IsSameSquare(o.boardPosition, p));
+        old?.remove();
+        if (old?.classList.contains(`chess-mark-${color}`)) return; //the same again takes it off
+
+        const mark = Chess.CreateSvg("rect", { class:`chess-mark-${color}`, width:1, height:1 });
+        this.PlaceOnSquare(mark, p.x, p.y);
+        this.marksLayer.appendChild(mark);
+    }
+
+    ToggleArrow(p0, p1, color) {
+        const old = [...this.arrowsLayer.children].find(o=> Chess.IsSameSquare(o.p0, p0) && Chess.IsSameSquare(o.p1, p1));
+        old?.remove();
+        if (old?.classList.contains(`chess-arrow-${color}`)) return; //the same again takes it off
+
+        this.arrowsLayer.appendChild(this.CreateArrow(p0, p1, color));
+    }
+
+    ClearMarks() {
+        this.marksLayer.textContent = "";
+        this.arrowsLayer.textContent = "";
+    }
+
+    SquareAt(event) {
+        const point = this.ClientToBoard(event);
+        if (point.x < 0 || point.y < 0 || point.x >= 8 || point.y >= 8) return null;
+        return this.FromDisplay(Math.floor(point.x), Math.floor(point.y));
+    }
+
+    static IsSameSquare(a, b) { //either may be null
+        return a?.x === b?.x && a?.y === b?.y;
+    }
+
+    CreateArrow(p0, p1, color = null) {
+        const arrow = Chess.CreateSvg("g", color ? { class:`chess-arrow-${color}` } : {});
+        arrow.append(Chess.CreateSvg("polyline"), Chess.CreateSvg("polygon"));
+        this.PlaceArrow(arrow, p0, p1);
+        return arrow;
+    }
+
+    PlaceArrow(arrow, p0, p1) {
+        arrow.p0 = p0;
+        arrow.p1 = p1;
+
+        const a = this.ToDisplay(p0.x, p0.y), b = this.ToDisplay(p1.x, p1.y);
+        const x0 = a.x + .5, y0 = a.y + .5, x1 = b.x + .5, y1 = b.y + .5;
+
+        //a knight's jump bends: the long way first, then the short
+        const isKnight = Math.abs((x1 - x0) * (y1 - y0)) === 2;
+        const [cx, cy] = !isKnight ? [x0, y0] : Math.abs(x1 - x0) === 2 ? [x1, y0] : [x0, y1];
+
+        const length = Math.hypot(x1 - cx, y1 - cy);
+        const ux = (x1 - cx) / length, uy = (y1 - cy) / length; //along its last leg
+        const px = -uy, py = ux; //across it
+        const head = .4, width = .22, tip = .15;
+
+        const [shaft, arrowhead] = arrow.children;
+        shaft.setAttribute("points", [
+            [x0, y0],
+            ...(isKnight ? [[cx, cy]] : []),
+            [x1 - ux * (head + tip - .02), y1 - uy * (head + tip - .02)]
+        ].map(o=> o.join(",")).join(" "));
+        arrowhead.setAttribute("points", [
+            [x1 - ux * tip, y1 - uy * tip],
+            [x1 - ux * (head + tip) + px * width, y1 - uy * (head + tip) + py * width],
+            [x1 - ux * (head + tip) - px * width, y1 - uy * (head + tip) - py * width]
+        ].map(o=> o.join(",")).join(" "));
+    }
+
     Orient() {
         this.AfterResize();
         this.svg.style.transform = this.spin ? `rotate(${this.spin}deg)` : "";
@@ -1065,6 +1189,9 @@ class Chess extends Window {
                 this.SetPieceDisplayPosition(piece, d.x, d.y);
             }
         }
+
+        for (const arrow of this.arrowsLayer.children)
+            this.PlaceArrow(arrow, arrow.p0, arrow.p1);
 
         this.reader?.DrawHint();
     }
@@ -1303,6 +1430,7 @@ class Chess extends Window {
 
         this.ClearSelection();
         this.ClearIndicators();
+        this.ClearMarks();
         this.reader?.ClearHint();
         this.MarkLastMove(lastmove);
     }
@@ -1342,6 +1470,7 @@ class Chess extends Window {
 
         this.ClearSelection();
         this.ClearIndicators();
+        this.ClearMarks();
         this.reader?.ClearHint();
         this.MarkLastMove(lastmove);
     }
@@ -1465,7 +1594,6 @@ class Chess extends Window {
         return id;
     }
 
-    //the reflection fades out a third of the way up the piece, mirrored: a third of its height in front of it
     GetReflectionMask(name) {
         const id = `${this.uid}-reflection-${name}`;
         if (this.defs.querySelector(`#${id}`)) return id;
@@ -1506,8 +1634,6 @@ class Chess extends Window {
         return id;
     }
 
-    //[promotion] is the ai's piece for a pawn reaching the last rank, "q", "r", "b" or "n": a queen when null.
-    //A player picks theirs in the promote dialog.
     PlayMove(p0, p1, element, promotion = null) {
         if (p0.x === p1.x && p0.y === p1.y) return;
         if (this.isClosed) return;

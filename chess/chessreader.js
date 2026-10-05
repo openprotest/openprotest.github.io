@@ -191,21 +191,7 @@ class ChessReader {
         chess.hintLayer.textContent = "";
         if (!this.hint) return;
 
-        const a = chess.ToDisplay(this.hint.p0.x, this.hint.p0.y), b = chess.ToDisplay(this.hint.p1.x, this.hint.p1.y);
-        const x0 = a.x + .5, y0 = a.y + .5, x1 = b.x + .5, y1 = b.y + .5;
-        const length = Math.hypot(x1 - x0, y1 - y0);
-        const ux = (x1 - x0) / length, uy = (y1 - y0) / length; //along it
-        const px = -uy, py = ux; //across it
-        const head = .4, width = .22, tip = .15;
-
-        const shaft = Chess.CreateSvg("line", { x1: x0, y1: y0, x2: x1 - ux * (head + tip - .02), y2: y1 - uy * (head + tip - .02) });
-        const arrowhead = Chess.CreateSvg("polygon", { points: [
-            [x1 - ux * tip, y1 - uy * tip],
-            [x1 - ux * (head + tip) + px * width, y1 - uy * (head + tip) + py * width],
-            [x1 - ux * (head + tip) - px * width, y1 - uy * (head + tip) - py * width]
-        ].map(o=> o.join(",")).join(" ") });
-
-        chess.hintLayer.append(shaft, arrowhead);
+        chess.hintLayer.appendChild(chess.CreateArrow(this.hint.p0, this.hint.p1));
     }
 
     static READ = {

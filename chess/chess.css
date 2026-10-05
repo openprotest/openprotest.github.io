@@ -345,16 +345,50 @@
 }
 
 .chess-hint-layer {
+    color: rgb(0,140,255);
     opacity: .8;
     pointer-events: none;
 }
 
-.chess-hint-layer > line {
-    stroke: rgb(0,140,255);
+.chess-hint-layer polyline,
+.chess-arrows-layer polyline {
+    fill: none;
+    stroke: currentColor;
     stroke-width: .16;
     stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
-.chess-hint-layer > polygon {
-    fill: rgb(0,140,255);
+.chess-hint-layer polygon,
+.chess-arrows-layer polygon {
+    fill: currentColor;
+}
+
+.chess-mark-red {
+    fill: rgba(235,97,80,.8);
+}
+
+.chess-mark-orange {
+    fill: rgba(255,170,0,.8);
+}
+
+.chess-mark-blue {
+    fill: rgba(82,176,220,.8);
+}
+
+.chess-arrows-layer { /* as a whole, overlapping arrows don't darken */
+    opacity: .8;
+    pointer-events: none;
+}
+
+.chess-arrow-orange {
+    color: rgb(255,170,0);
+}
+
+.chess-arrow-red {
+    color: rgb(235,97,80);
+}
+
+.chess-arrow-blue {
+    color: rgb(82,176,220);
 }
