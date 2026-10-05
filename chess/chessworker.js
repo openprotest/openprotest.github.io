@@ -1,5 +1,6 @@
 //The chess engine, off the page's thread: a search can take seconds, and the page stays responsive meanwhile.
-//Answers {fen, level, positions} with {move}: ChessAi's answer ("e2-e4", "" for none), or null if it failed.
+//Answers {fen, level, positions} with {move}: ChessAi's answer ("e2-e4", "e7-e8q" for a promotion, "" for none),
+//or null if it failed.
 
 importScripts("../wasm_exec.js");
 

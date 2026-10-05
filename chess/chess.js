@@ -597,7 +597,8 @@ class Chess extends Window {
         this.engineRunning = this.engineWaiting = null;
     }
 
-    //Resolves to the engine's move for a position, in its "e2-e4" form, or null. [positions] are the game's, for repetitions.
+    //Resolves to the engine's move for a position, in its "e2-e4" form ("e7-e8q" for a promotion), or null.
+    //[positions] are the game's, for repetitions.
     //One search runs at a time, and the top level's takes seconds: a request made meanwhile waits for it, and replaces
     //one waiting already, which resolves to null. The board has moved on from that position.
     AskEngine(fen, level, positions) {
@@ -646,13 +647,14 @@ class Chess extends Window {
                 if (!move) return;
             }
 
-            this.PlayMove(move.p0, move.p1, null);
+            this.PlayMove(move.p0, move.p1, null, move.promotion);
         }, delay);
     }
 
-    //Returns {p0, p1} from the engine's "e2-e4" form, or null if it's not a legal move of the side to move.
+    //Returns {p0, p1, promotion} from the engine's "e2-e4" form, or null if it's not a legal move of the side to move.
+    //A promotion's piece is a letter after the move, "e7-e8n": promotion is "q", "r", "b" or "n" then, and null otherwise.
     ParseAiMove(aiMove) {
-        if (typeof aiMove !== "string" || !/^[a-h][1-8]-[a-h][1-8]$/.test(aiMove)) return null;
+        if (typeof aiMove !== "string" || !/^[a-h][1-8]-[a-h][1-8][qrbn]?$/.test(aiMove)) return null;
 
         const p0 = {x: aiMove.charCodeAt(0) - 97, y: 8 - parseInt(aiMove[1])};
         const p1 = {x: aiMove.charCodeAt(3) - 97, y: 8 - parseInt(aiMove[4])};
@@ -660,7 +662,7 @@ class Chess extends Window {
         if (this.GetPieceColor(p0, this.game) !== this.game.activecolor) return null;
         if (!this.GetLegalMoves(p0, this.game).some(o=> o.x === p1.x && o.y === p1.y)) return null;
 
-        return { p0: p0, p1: p1 };
+        return { p0: p0, p1: p1, promotion: aiMove[5] ?? null };
     }
 
     GetRandomLegalMove() {
@@ -1350,7 +1352,9 @@ class Chess extends Window {
         return id;
     }
 
-    PlayMove(p0, p1, element) {
+    //[promotion] is the ai's piece for a pawn reaching the last rank, "q", "r", "b" or "n": a queen when null.
+    //A player picks theirs in the promote dialog.
+    PlayMove(p0, p1, element, promotion = null) {
         if (p0.x === p1.x && p0.y === p1.y) return;
         if (this.isClosed) return;
         this.reader?.ClearHint();
@@ -1448,14 +1452,10 @@ class Chess extends Window {
         };
 
         if (isPromotion) {
-            //ai always promotes to queen
-            if (this.game.activecolor === "w" && this.playerA === "ai") {
-                this.game.placement[p1.x][p1.y] = "Q";
-                this.SetPieceType(element, "q");
-            }
-            else if (this.game.activecolor === "b" && this.playerB === "ai") {
-                this.game.placement[p1.x][p1.y] = "q";
-                this.SetPieceType(element, "q");
+            if (this.IsAiTurn()) {
+                const type = promotion ?? "q";
+                this.game.placement[p1.x][p1.y] = this.game.activecolor === "w" ? type.toUpperCase() : type;
+                this.SetPieceType(element, type);
             }
             else {
                 //the position is only final once a piece is picked. the piece has landed, so it sounds now

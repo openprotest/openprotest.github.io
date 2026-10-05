@@ -177,7 +177,8 @@ class ChessReader {
 
         this.hint = move;
         this.DrawHint();
-        this.hintText.textContent = `Engine (${name}): ${chess.GetMoveNotation(move.p0, move.p1)}`;
+        const promotion = move.promotion ? "=" + move.promotion.toUpperCase() : "";
+        this.hintText.textContent = `Engine (${name}): ${chess.GetMoveNotation(move.p0, move.p1)}${promotion}`;
     }
 
     ClearHint() {

@@ -48,7 +48,8 @@ const (
 )
 
 type Move struct {
-	from, to int8
+	from, to  int8
+	promotion PieceType //the piece a pawn becomes on the last rank, Empty for any other move
 }
 
 const (
@@ -59,6 +60,7 @@ const (
 
 	deltaMargin  = 200 //largest positional swing a capture is expected to add on top of the captured material
 	endgamePhase = 8   //from this game phase down there is no random pick, see calculate
+	underpromote = 50  //how much better than the best an underpromotion has to score at the root, see calculate
 
 	//pruning, see alphaBeta. by remaining depth: the levels of depth 3 and less search every move to its full depth
 	nullMinDepth = 3 //from which a null move is tried
@@ -435,11 +437,16 @@ func loadFen(fen *string) (Game, error) {
 	return game, nil
 }
 
+// moveToString writes [move] as "e2-e4", and a promotion with its piece as "e7-e8q". "" for no move.
 func moveToString(move Move) string {
 	if move.from == move.to {
 		return ""
 	}
-	return squareName(move.from) + "-" + squareName(move.to)
+	var name string = squareName(move.from) + "-" + squareName(move.to)
+	if move.promotion != Empty {
+		name += string(" pnbrqk"[move.promotion])
+	}
+	return name
 }
 
 func printPosition(game *Game) {
@@ -506,8 +513,8 @@ func (game *Game) inCheck(color PieceColor) bool {
 }
 
 // pseudoLegalMoves appends every move for the side to move to [moves], without checking if it leaves the king in check.
-// Castling is fully validated here. Pawns always promote to queen.
-// With [capturesOnly] quiet moves are skipped, except promotions.
+// Castling is fully validated here. A pawn reaching the last rank promotes to any of the four pieces.
+// With [capturesOnly] quiet moves are skipped, except promotions to a queen.
 func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
 	var b *[64]byte = &game.board
 	var color PieceColor = game.color
@@ -532,22 +539,22 @@ func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
 			if to := from + forward; to < 0 || to > 63 { //pawn on the last rank, only possible from a malformed fen
 				continue
 			} else if b[to] == 0 && (quiet || to < 8 || to >= 56) { //1 square forward
-				moves = append(moves, Move{from, to})
+				moves = pawnMove(moves, from, to, quiet)
 				if quiet && from/8 == startRank && b[to+forward] == 0 { //2 squares forward
-					moves = append(moves, Move{from, to + forward})
+					moves = append(moves, Move{from, to + forward, Empty})
 				}
 			}
 
 			for _, to := range pawnCaptures[color][from] { //captures and en passant
 				if (b[to] != 0 && pieceColor(b[to]) == enemy) || to == game.enPassant {
-					moves = append(moves, Move{from, to})
+					moves = pawnMove(moves, from, to, quiet)
 				}
 			}
 
 		case Knight:
 			for _, to := range knightTargets[from] {
 				if (b[to] == 0 && quiet) || (b[to] != 0 && pieceColor(b[to]) == enemy) {
-					moves = append(moves, Move{from, to})
+					moves = append(moves, Move{from, to, Empty})
 				}
 			}
 
@@ -563,7 +570,7 @@ func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
 		case King:
 			for _, to := range kingTargets[from] {
 				if (b[to] == 0 && quiet) || (b[to] != 0 && pieceColor(b[to]) == enemy) {
-					moves = append(moves, Move{from, to})
+					moves = append(moves, Move{from, to, Empty})
 				}
 			}
 			if quiet {
@@ -575,17 +582,31 @@ func pseudoLegalMoves(game *Game, moves []Move, capturesOnly bool) []Move {
 	return moves
 }
 
+// pawnMove appends a pawn's move to [moves], as its promotions on the last rank: the queen first, then the
+// underpromotions, a knight for its checks and forks, a rook or a bishop where a queen would stalemate.
+// Without [underpromote], only the queen (quiescence, where only material counts).
+func pawnMove(moves []Move, from, to int8, underpromote bool) []Move {
+	if to >= 8 && to < 56 {
+		return append(moves, Move{from, to, Empty})
+	}
+	moves = append(moves, Move{from, to, Queen})
+	if underpromote {
+		moves = append(moves, Move{from, to, Knight}, Move{from, to, Rook}, Move{from, to, Bishop})
+	}
+	return moves
+}
+
 func slidingMoves(b *[64]byte, enemy PieceColor, from int8, dirFrom, dirTo int, quiet bool, moves []Move) []Move {
 	for d := dirFrom; d < dirTo; d++ {
 		for _, to := range rays[from][d] {
 			if b[to] == 0 {
 				if quiet {
-					moves = append(moves, Move{from, to})
+					moves = append(moves, Move{from, to, Empty})
 				}
 				continue
 			}
 			if pieceColor(b[to]) == enemy {
-				moves = append(moves, Move{from, to})
+				moves = append(moves, Move{from, to, Empty})
 			}
 			break
 		}
@@ -614,13 +635,13 @@ func castlingMoves(game *Game, from int8, moves []Move) []Move {
 	if game.castling&kingSide != 0 &&
 		b[home+1] == 0 && b[home+2] == 0 && b[home+3] == rook &&
 		!game.isAttacked(home+1, enemy) && !game.isAttacked(home+2, enemy) {
-		moves = append(moves, Move{home, home + 2})
+		moves = append(moves, Move{home, home + 2, Empty})
 	}
 
 	if game.castling&queenSide != 0 &&
 		b[home-1] == 0 && b[home-2] == 0 && b[home-3] == 0 && b[home-4] == rook &&
 		!game.isAttacked(home-1, enemy) && !game.isAttacked(home-2, enemy) {
-		moves = append(moves, Move{home, home - 2})
+		moves = append(moves, Move{home, home - 2, Empty})
 	}
 
 	return moves
@@ -680,8 +701,12 @@ func (game *Game) makeMove(move Move) {
 				b[captured] = 0
 			}
 		}
-		if move.to < 8 || move.to >= 56 { //promote
-			b[move.to] = makePiece(Queen, color)
+		if move.to < 8 || move.to >= 56 { //promote, to a queen when the move doesn't say
+			var promotion PieceType = move.promotion
+			if promotion == Empty {
+				promotion = Queen
+			}
+			b[move.to] = makePiece(promotion, color)
 			hash ^= zobristPiece[piece][move.to] ^ zobristPiece[b[move.to]][move.to]
 		}
 
@@ -1079,9 +1104,9 @@ func init() {
 
 		for _, token := range strings.Fields(line) {
 			var name string = strings.TrimSuffix(token, "?")
-			var move Move = Move{-1, -1}
+			var move Move = Move{-1, -1, Empty}
 			if len(name) == 4 {
-				move = Move{parseSquare(name[:2]), parseSquare(name[2:])}
+				move = Move{parseSquare(name[:2]), parseSquare(name[2:]), Empty}
 			}
 
 			if !slices.Contains(legalMoves(&game), move) {
@@ -1223,8 +1248,8 @@ func (s *searcher) visit() bool {
 	return !s.aborted
 }
 
-// orderScore ranks the table's move first, then captures by most valuable victim / least valuable attacker,
-// then promotions, then killer moves.
+// orderScore ranks the table's move first, then promotions to a queen, captures by most valuable victim / least
+// valuable attacker, killer moves, the other quiet moves, and underpromotions last.
 func (s *searcher) orderScore(game *Game, move Move, ply int, hashMove Move) int32 {
 	if move == hashMove {
 		return 1 << 30
@@ -1244,8 +1269,10 @@ func (s *searcher) orderScore(game *Game, move Move, ply int, hashMove Move) int
 		score = 8000
 	}
 
-	if attacker == Pawn && (move.to < 8 || move.to >= 56) {
+	if move.promotion == Queen {
 		score += 20000
+	} else if move.promotion != Empty { //underpromotions last, among the quiet moves: a queen is almost always better
+		score = -1
 	}
 
 	return score
@@ -1352,7 +1379,14 @@ func calculate(game *Game, depth int, nearEqual int, moveTime time.Duration, his
 			scores[i] = score
 			searched++
 
-			if score > alpha {
+			//an underpromotion only when it's clearly better: about as good as the best, the piece is lost anyway,
+			//or doesn't matter, and the difference is the search's noise. a queen it is then
+			var bar int = alpha
+			if move.promotion != Empty && move.promotion != Queen && alpha > -infinity {
+				bar = alpha + underpromote
+			}
+
+			if score > bar {
 				alpha = score
 				bestIndex = i
 			}
@@ -1364,10 +1398,11 @@ func calculate(game *Game, depth int, nearEqual int, moveTime time.Duration, his
 			break
 		}
 
-		//a move that failed low scores [floor], below alpha-margin, so it's never taken for a near-best
+		//a move that failed low scores [floor], below alpha-margin, so it's never taken for a near-best.
+		//an underpromotion only when it's the best, see above
 		nearBest = nearBest[:0]
 		for i := range searched {
-			if scores[i] >= alpha-margin {
+			if scores[i] >= alpha-margin && (i == bestIndex || moves[i].promotion == Empty || moves[i].promotion == Queen) {
 				nearBest = append(nearBest, moves[i])
 			}
 		}
@@ -1471,7 +1506,7 @@ func (s *searcher) alphaBeta(game *Game, depth int, ply int, alpha, beta int, al
 		//move rarely raises alpha. it gets a shallower null window search first, and the full one only if it does.
 		//not when in check, or when the move gives check: tactics
 		var score int
-		if depth >= lmrMinDepth && legal > lmrFullMoves && order[i] == 0 && !inCheck && !next.inCheck(next.color) {
+		if depth >= lmrMinDepth && legal > lmrFullMoves && order[i] <= 0 && !inCheck && !next.inCheck(next.color) {
 			var reduction int = 1
 			if depth >= 5 && legal > 2*lmrFullMoves {
 				reduction = 2
