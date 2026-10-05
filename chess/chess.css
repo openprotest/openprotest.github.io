@@ -16,15 +16,93 @@
     height: 100%;
     overflow: visible;
     box-shadow: #777 0 0 0 4px;
-    border-radius: 4px;
+    border-radius: calc(4px * (1 - var(--chess-rise))); /* square in perspective, on its sides */
 }
 
-.chess-square-light {
-    fill: rgba(112,112,112,.8);
+@property --chess-spin { /* of the board, while orbiting or flipping. the slab turns with it, see Chess.Orient */
+    syntax: "<angle>";
+    inherits: true;
+    initial-value: 0deg;
+}
+
+.chess-slab { /* the board's sides and their shadow. under the board, with its box and transform, see Chess.AfterResize */
+    position: absolute;
+    z-index: 0;
+    transform-style: preserve-3d;
+    pointer-events: none;
+    transition: left .1s, transform .4s ease-in-out, --chess-rise .4s ease-in-out;
+}
+
+.chess-slab-turn { /* out to the frame, half a pixel in, under it, so no seam shows */
+    position: absolute;
+    inset: -3.5px;
+    transform-style: preserve-3d;
+    transform: rotate(var(--chess-spin));
+}
+
+.chess-slab-side { /* hanging back from an edge. lit from the front left, as it turns. flat, edge on and out of sight */
+    position: absolute;
+    backface-visibility: hidden;
+    background-color: hsl(0 0% calc(30% + 8% * cos(var(--chess-spin) - var(--chess-side) - 30deg)));
+}
+
+.chess-slab-front {
+    --chess-side: 0deg;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: var(--chess-thickness);
+    transform-origin: top;
+    transform: rotateX(-90deg);
+    background-image: linear-gradient(to bottom, transparent, rgba(0,0,0,.25));
+}
+
+.chess-slab-right {
+    --chess-side: 90deg;
+    top: 0;
+    bottom: 0;
+    left: 100%;
+    width: var(--chess-thickness);
+    transform-origin: left;
+    transform: rotateY(90deg);
+    background-image: linear-gradient(to right, transparent, rgba(0,0,0,.25));
+}
+
+.chess-slab-back {
+    --chess-side: 180deg;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: var(--chess-thickness);
+    transform-origin: bottom;
+    transform: rotateX(90deg);
+    background-image: linear-gradient(to top, transparent, rgba(0,0,0,.25));
+}
+
+.chess-slab-left {
+    --chess-side: -90deg;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: var(--chess-thickness);
+    transform-origin: right;
+    transform: rotateY(-90deg);
+    background-image: linear-gradient(to left, transparent, rgba(0,0,0,.25));
+}
+
+.chess-slab-shadow { /* on the ground the sides stand on, around them only. paint only, see .chess-piece-reflection */
+    position: absolute;
+    inset: 0;
+    transform: translateZ(calc(-1 * var(--chess-thickness)));
+    box-shadow: 0 0 calc(var(--chess-thickness) * 2) calc(var(--chess-thickness) * .4) rgb(0 0 0 / calc(.6 * var(--chess-rise)));
+}
+
+.chess-square-light { /* solid, nothing behind shows through, glass or not. as it was over the window's rgb(64,64,64) */
+    fill: rgb(102,102,102);
 }
 
 .chess-square-dark {
-    fill: rgba(64,64,64,.8);
+    fill: rgb(64,64,64);
 }
 
 .chess-lastmove-from {
@@ -79,20 +157,31 @@
     transition: transform .4s ease-in-out;
 }
 
-.chess-tilting .chess-piece-reflection { /* fades in and out with the perspective */
-    transition: opacity .4s ease-in-out;
+.chess-tilting .chess-piece-reflection { /* fades in and out with the perspective. paint only, an opacity transition runs composited, drawn too coarse to see in the board's perspective */
+    transition: fill-opacity .4s ease-in-out;
+}
+
+.chess-flipping ~ .chess-slab .chess-slab-turn {
+    transition: --chess-spin .6s ease-in-out;
+}
+
+.chess-tilting ~ .chess-slab .chess-slab-turn {
+    transition: --chess-spin .4s ease-in-out;
 }
 
 .chess-instant .chess-svg,
 .chess-instant .chess-piece,
-.chess-instant .chess-piece-copy {
+.chess-instant .chess-piece-copy,
+.chess-instant ~ .chess-slab .chess-slab-turn {
     transition: none;
 }
 
 .chess-orbiting,
 .chess-orbiting .chess-svg,
 .chess-orbiting .chess-piece,
-.chess-orbiting .chess-piece-copy {
+.chess-orbiting .chess-piece-copy,
+.chess-orbiting ~ .chess-slab,
+.chess-orbiting ~ .chess-slab .chess-slab-turn {
     transition: none;
 }
 
@@ -123,9 +212,11 @@
 
 .chess-move-indicator {
     fill: var(--clr-accent);
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: chess-fadein .4s;
+    animation: chess-indicator-in .4s;
+}
+
+@keyframes chess-indicator-in { /* paint only. a transform or filter animation runs composited, drawn too coarse in the board's perspective */
+    0% { fill-opacity: 0; stroke-opacity: 0 }
 }
 
 .chess-capture-indicator {
@@ -261,10 +352,21 @@
     padding: 16px;
     text-align: center;
     color: var(--clr-dark);
+    background-color: var(--clr-transparent);
+    backdrop-filter: blur(8px);
+    border: 2px solid var(--clr-accent);
+    box-shadow: rgba(0,0,0,.4) 0 12px 16px;
+    animation: chess-fadein .4s;
+}
+
+.chess-result > img {
+    width: 72px;
+    height: 72px;
+    filter: drop-shadow(1px 1px 0 rgba(0,0,0,.6)); /* hard, no blur */
 }
 
 .chess-result > p {
-    margin: 0 0 16px 0;
+    margin: 4px 0 0 0;
     font-size: 18px;
     font-weight: 600;
 }
@@ -288,6 +390,54 @@
     0%   { transform: scale(.9); filter: opacity(0) }
     100% { transform: none;      filter: none }
 }
+.chess-captures-group { /* a side's captures, and the material it's ahead by past their end */
+    position: absolute;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: opacity .2s, visibility .2s;
+}
+
+.chess-captures-group.chess-captures-cramped,
+.chess-captures:empty,
+.chess-advantage:empty {
+    display: none;
+}
+
+.chess-orbit-dragged > .chess-captures-group {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.chess-captures {
+    display: flex;
+    padding: 2px;
+    border-radius: 4px;
+    background-color: rgb(192,192,192,.6); /* as the menu bar */
+}
+
+.chess-captures > img {
+    width: 24px;
+    height: 24px;
+    animation: chess-capture-in .4s;
+}
+
+.chess-advantage {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--clr-contrast);
+}
+
+.chess-captures > img.chess-captured-white {
+    filter: invert(1) drop-shadow(0 0 1px rgba(0,0,0,.6)); /* a light piece, outlined on the light box */
+}
+
+@keyframes chess-capture-in { /* not chess-fadein, its filter would cover a light piece's */
+    0%   { transform: scale(.5); opacity: 0 }
+    100% { transform: none;      opacity: 1 }
+}
+
 .chess-menubar > div.chess-active {
     background-color: var(--clr-accent);
 }

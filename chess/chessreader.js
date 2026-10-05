@@ -118,7 +118,7 @@ class ChessReader {
         this.isSwitched = false;
 
         this.fen = imported.fen;
-        chess.NewGame(reading.flipped ? "b" : "w", imported.fen); //the ai waits, see Chess.PlayAiMove
+        chess.NewGame(imported.fen, reading.flipped ? "ai" : "ui", reading.flipped ? "ui" : "ai"); //the ai waits, see Chess.PlayAiMove
 
         if (this.hintSide) this.UpdateHint();
         else this.SetHintSide(reading.flipped ? "b" : "w");
@@ -132,7 +132,7 @@ class ChessReader {
             fields[3] = "-";
             this.fen = fields.join(" ");
             this.isSwitched = true;
-            this.chess.NewGame(this.chess.GetPlayerSide(), this.fen);
+            this.chess.NewGame(this.fen);
         }
         this.SetHintSide(side);
     }
