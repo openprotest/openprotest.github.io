@@ -1,7 +1,13 @@
+@property --chess-rise { /* 0 in the top view, 1 in perspective, see Chess.AfterResize */
+    syntax: "<number>";
+    inherits: true;
+    initial-value: 0;
+}
+
 .chess-board {
     position: absolute;
     z-index: 1;
-    transition: left .1s, transform .4s ease-in-out;
+    transition: left .1s, transform .4s ease-in-out, --chess-rise .4s ease-in-out;
 }
 
 .chess-svg {
@@ -22,11 +28,11 @@
 }
 
 .chess-lastmove-from {
-    fill: color-mix(in srgb, var(--clr-accent) 22%, transparent);
+    fill: color-mix(in srgb, var(--clr-accent) 25%, transparent);
 }
 
 .chess-lastmove-to {
-    fill: color-mix(in srgb, var(--clr-accent) 42%, transparent);
+    fill: color-mix(in srgb, var(--clr-accent) 60%, transparent);
 }
 
 .chess-selection {
@@ -67,14 +73,26 @@
     transition: none;
 }
 
+.chess-tilting .chess-svg,
 .chess-tilting .chess-piece,
 .chess-tilting .chess-piece-copy {
     transition: transform .4s ease-in-out;
 }
 
+.chess-tilting .chess-piece-reflection { /* fades in and out with the perspective */
+    transition: opacity .4s ease-in-out;
+}
+
 .chess-instant .chess-svg,
 .chess-instant .chess-piece,
 .chess-instant .chess-piece-copy {
+    transition: none;
+}
+
+.chess-orbiting,
+.chess-orbiting .chess-svg,
+.chess-orbiting .chess-piece,
+.chess-orbiting .chess-piece-copy {
     transition: none;
 }
 
@@ -86,12 +104,21 @@
     fill: transparent;
 }
 
-.chess-piece-tint {
-    fill: rgba(16,16,16,.5);
+.chess-piece-reflection { /* at the full tilt. in perspective, 3/4 of it */
+    fill: rgba(16,16,16,.33);
+    pointer-events: none;
+}
+
+.chess-white .chess-piece-reflection {
+    fill: rgba(255,255,255,.16);
+}
+
+.chess-piece-tint { /* denser in perspective */
+    fill: rgb(16 16 16 / calc(.5 + .15 * var(--chess-rise)));
 }
 
 .chess-white .chess-piece-tint {
-    fill: rgba(255,255,255,.3);
+    fill: rgb(255 255 255 / calc(.3 + .2 * var(--chess-rise)));
 }
 
 .chess-move-indicator {
@@ -151,7 +178,7 @@
     top: 52px;
     bottom: 0;
     width: 250px;
-    color: rgb(192,192,192);
+    color: rgb(224,224,224);
     background-color: rgba(72,72,72,.6);
     border-radius: 4px;
     transition: .2s;
@@ -180,7 +207,7 @@
 }
 
 .chess-move-number {
-    color: rgb(128,128,128);
+    color: rgba(224,224,224,.4);
     text-align: right;
 }
 

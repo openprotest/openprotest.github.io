@@ -6,9 +6,10 @@ class Chess extends Window {
     static REFRACTION_SCALE = .275;
     static PIECE_TONE = { w:{ slope:1, intercept:.35 }, b:{ slope:.7, intercept:-.12 } }; //of the refracted board: an intercept shifts it without flattening it, as the tint does
     static TILT = 45;          //deg, of the board in perspective
+    static TILT_MAX = 60;      //deg, as far as an orbit tilts it
     static PERSPECTIVE = 2.5;  //the viewer's distance, in board sizes
     static PIECE_FOOT = .93;   //where the piece images stand, in squares
-    static PIECE_STEP = .13;   //standing pieces step back from the front edge of their square
+    static PIECE_HEIGHT = { pawn:.68, rook:.74, knight:.81, bishop:.83, queen:.84, king:.83 }; //of the piece images, from the foot up
 
     static instances = 0;
     static pieceMaps = {};
@@ -251,7 +252,9 @@ class Chess extends Window {
         this.board.addEventListener("touchmove",   event => this.Board_mousemove(event, true));
         this.board.addEventListener("touchend",    event => this.Board_mouseup(event, true));
         this.board.addEventListener("touchcancel", event => this.Board_mouseleave(event, true));
-        
+
+        this.content.addEventListener("mousedown", event => this.Orbit_mousedown(event)); //around the board
+
         this.content.appendChild(this.board);
 
         this.playerA = this.params?.playerA ?? "ui"; //white
@@ -304,6 +307,9 @@ class Chess extends Window {
         this.indicators = [];
         this.isFlipped = this.GetPlayerSide() === "b"; //the player's side at the bottom
         this.is3d = false;
+        this.tilt = 0;     //deg, of the board: 0 flat, Chess.TILT in perspective, or where an orbit takes it
+        this.spin = 0;     //deg, the board turns on its center while orbiting
+        this.orbit = null; //where the drag around the board started, see Orbit_mousedown
         this.pieceCount = 0; //for the ids, a piece refracts the one behind it by id
         this.isGameOver = false;
         this.positions = []; //PositionKey of every position of the game, for repetitions
@@ -337,16 +343,16 @@ class Chess extends Window {
         newButton.style.backgroundPosition = "50% -2px";
         newButton.style.left = "2px";
 
-        const flipButton = this.CreateMenuButton("Flip board", "url(mono/update.svg)");
-        flipButton.style.left = "50px";
-
         const fenButton = this.CreateMenuButton("Copy FEN", "url(mono/copy.svg)");
-        fenButton.style.left = "98px";
+        fenButton.style.left = "50px";
+
+        const flipButton = this.CreateMenuButton("Flip board", "url(mono/update.svg)");
+        flipButton.style.left = "98px";
 
         const readButton = this.CreateMenuButton("Screen reader", "url(mono/screenrecord.svg)");
         readButton.style.left = "146px";
         
-        this.menubar.append(newButton, flipButton, fenButton, readButton);
+        this.menubar.append(newButton, fenButton, flipButton, readButton);
 
         this.sidepanel = document.createElement("div");
         this.sidepanel.className = "chess-sidepanel";
@@ -809,15 +815,15 @@ class Chess extends Window {
         if (index === this.view) return;
         if (this.selected || this.isPromotionPending) return;
 
+        const before = this.ParseFen(this.history[this.view].fen).placement;
+        const isStep = Math.abs(index - this.view) === 1; //a move apart, it slides. further, it's placed anew
         this.view = index;
 
-        if (this.IsLive()) {
-            this.RenderPlacement(this.game.placement, this.game.lastmove);
-        }
-        else {
-            const game = this.ParseFen(this.history[index].fen);
+        const game = this.IsLive() ? this.game : this.ParseFen(this.history[index].fen);
+        if (isStep)
+            this.SlidePlacement(before, game.placement, game.lastmove);
+        else
             this.RenderPlacement(game.placement, game.lastmove);
-        }
 
         this.board.inert = !this.IsLive();
         this.SelectMove();
@@ -875,9 +881,9 @@ class Chess extends Window {
         this.board.style.left = (w - min) / 2 + offset + "px";
         this.board.style.top = (h - min) / 2 + "px";
 
-        if (this.is3d) {
-            const distance = Chess.PERSPECTIVE, tilt = Chess.TILT * Math.PI / 180;
-            const back = .59; //the half board, and the back rank that stands over its edge: a king, about .6 of a square
+        if (this.tilt > 0) {
+            const distance = Chess.PERSPECTIVE, tilt = this.tilt * Math.PI / 180;
+            const back = .63; //the half board, and the back rank that stands over its edge: a king, about a square
             const near = distance / (distance - .5 * Math.sin(tilt)); //the front edge comes nearer and widens
             const far = distance / (distance + back * Math.sin(tilt));
             const top = -back * Math.cos(tilt) * far, bottom = .5 * Math.cos(tilt) * near; //projected, in board sizes from the center
@@ -886,16 +892,18 @@ class Chess extends Window {
             const shift = -(top + bottom) / 2 * scale * min; //centers the projection, not the board
 
             this.projection = { scale: scale, shift: shift, distance: distance * min, tilt: tilt };
-            this.board.style.transform = `translateY(${shift}px) scale(${scale}) perspective(${distance * min}px) rotateX(${Chess.TILT}deg)`;
+            this.board.style.transform = `translateY(${shift}px) scale(${scale}) perspective(${distance * min}px) rotateX(${this.tilt}deg)`;
         }
         else {
             this.projection = null;
             this.board.style.transform = "";
         }
+
+        this.board.style.setProperty("--chess-rise", Math.min(1, this.tilt / Chess.TILT)); //the pieces' glass gets denser in perspective, see chess.css
     }
 
     FlipBoard() {
-        if (this.selected) return;
+        if (this.selected || this.orbit) return;
 
         this.isFlipped = !this.isFlipped;
         const pieces = [...this.piecesLayer.children, ...this.liftLayer.children];
@@ -926,9 +934,10 @@ class Chess extends Window {
     }
 
     TogglePerspective() {
-        if (this.selected) return;
+        if (this.selected || this.orbit) return;
 
         this.is3d = !this.is3d;
+        this.tilt = this.is3d ? Chess.TILT : 0;
 
         this.board.classList.add("chess-tilting"); //the pieces stand up at the pace the board tilts
         this.UpdateRefractions();
@@ -941,6 +950,78 @@ class Chess extends Window {
             this.board.classList.remove("chess-tilting");
             this.UpdateRefractions();
         }, 450);
+    }
+
+    //Dragged on the space around the board: across, it turns on its center, up and down, it tilts. Released, it goes back.
+    Orbit_mousedown(event) {
+        if (event.button !== 0 || event.target !== this.content) return;
+        if (this.selected || this.orbit || this.board.classList.contains("chess-flipping")) return;
+
+        event.preventDefault(); //no text selection along the way
+        this.win.focus({ preventScroll: true }); //for the arrow keys, as the click would
+
+        const doc = this.content.ownerDocument; //popped out, it's another one
+        const move = event=> this.Orbit_mousemove(event);
+        const up = ()=> this.Orbit_mouseup();
+        doc.addEventListener("mousemove", move);
+        doc.addEventListener("mouseup", up);
+
+        this.orbit = {
+            x0: event.clientX,
+            y0: event.clientY,
+            tilt0: this.tilt,
+            release: ()=> {
+                doc.removeEventListener("mousemove", move);
+                doc.removeEventListener("mouseup", up);
+            }
+        };
+
+        clearTimeout(this.tiltTimer);
+        this.board.classList.remove("chess-tilting");
+        this.board.classList.add("chess-orbiting"); //follows the mouse, no transitions
+        this.content.style.cursor = "grabbing";
+        this.UpdateRefractions();
+    }
+
+    Orbit_mousemove(event) {
+        if (event.buttons !== 1) { //released outside
+            this.Orbit_mouseup();
+            return;
+        }
+
+        const dx = event.clientX - this.orbit.x0, dy = event.clientY - this.orbit.y0;
+        this.spin = ((-dx * .5) % 360 + 540) % 360 - 180; //the front follows the mouse. in -180..180, so it goes back the short way
+        this.tilt = Math.max(0, Math.min(Chess.TILT_MAX, this.orbit.tilt0 - dy * .25));
+        this.Orient();
+        this.SortPieces(); //from the back, as it's turned
+    }
+
+    Orbit_mouseup() {
+        if (!this.orbit) return;
+        this.orbit.release();
+        this.orbit = null;
+
+        this.board.classList.remove("chess-orbiting");
+        this.board.classList.add("chess-tilting"); //the pieces go back at the pace the board does
+        this.content.style.cursor = "";
+
+        this.spin = 0;
+        this.tilt = this.is3d ? Chess.TILT : 0;
+        this.Orient();
+
+        clearTimeout(this.tiltTimer);
+        this.tiltTimer = setTimeout(()=> {
+            this.board.classList.remove("chess-tilting");
+            this.SortPieces(); //once they stand still, moving them in the dom would cut their transitions
+        }, 450);
+    }
+
+    //the board and its pieces to the current tilt and spin
+    Orient() {
+        this.AfterResize();
+        this.svg.style.transform = this.spin ? `rotate(${this.spin}deg)` : "";
+        for (const piece of [...this.piecesLayer.children, ...this.liftLayer.children])
+            this.SetPieceDisplayPosition(piece, piece.displayPosition.x, piece.displayPosition.y, piece.scale, -this.spin);
     }
 
     ToDisplay(x, y) {
@@ -1012,24 +1093,33 @@ class Chess extends Window {
         piece.rotation = rotation;
 
         const foot = Chess.PIECE_FOOT;
-        const step = this.is3d ? Chess.PIECE_STEP : 0;
-        let stand = 1;
-        if (this.is3d) {
-            const tilt = Chess.TILT * Math.PI / 180, distance = Chess.PERSPECTIVE;
+        const rise = Math.min(1, this.tilt / Chess.TILT); //flat, the pieces lie on the board. they stand up as it tilts
+        const step = (foot - .6) * rise; //standing pieces step back to the center of their square
+        let stand = 1, lean = 0;
+        if (this.tilt > 0) {
+            const tilt = this.tilt * Math.PI / 180, distance = Chess.PERSPECTIVE;
             const turn = -rotation * Math.PI / 180; //the svg turns opposite to the piece, so this is where it's seen while the board flips
             const depth = 4 + (x - 3.5) * Math.sin(turn) + (y - 3.5) * Math.cos(turn) + foot - step - .5; //of the foot, in squares
+            const across = (x - 3.5) * Math.cos(turn) - (y - 3.5) * Math.sin(turn); //of the foot from the board's center line, in squares
             const v = (depth - 4) / 8; //from the board's center towards the viewer, in board sizes
-            stand = (distance - v * Math.sin(tilt)) / (distance * Math.cos(tilt));
+            const near = distance / (distance - v * Math.sin(tilt)); //the perspective's scale at the foot
+            const upright = (distance - v * Math.sin(tilt)) * .95 / (distance * Math.cos(tilt)) * 1.2;
+            stand = 1 + (upright - 1) * rise;
+            //the perspective bends uprights towards its vanishing point, more the further they are from the center line. this bends them back
+            lean = Math.atan(-across * near * Math.sin(tilt) * stand / (distance * 8)) * 180 / Math.PI * rise;
         }
 
         //in an svg, px are user units: squares. the board copy gets the inverse, so it stays aligned with the board
-        piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px) translate(0px, ${foot - step}px) scale(1, ${stand}) translate(0px, ${-foot}px)`;
-        piece.hit.style.transform = `translate(0px, ${foot}px) scale(1, ${1 / stand}) translate(0px, ${step - foot}px)`; //stays on its square, the one it's picked from
-        piece.copy.style.transform = `translate(0px, ${foot}px) scale(1, ${1 / stand}) translate(0px, ${step - foot}px) translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
+        piece.style.transform = `translate(${x}px, ${y}px) translate(.5px, .5px) rotate(${rotation}deg) scale(${scale}) translate(-.5px, -.5px) translate(0px, ${foot - step}px) scale(1, ${stand}) skewX(${lean}deg) translate(0px, ${-foot}px)`;
+        piece.hit.style.transform = `translate(0px, ${foot}px) skewX(${-lean}deg) scale(1, ${1 / stand}) translate(0px, ${step - foot}px)`; //stays on its square, the one it's picked from
+        piece.reflection.style.opacity = this.tilt / Chess.TILT_MAX; //none in the top view, fading in all the way up
+        piece.copy.style.transform = `translate(0px, ${foot}px) skewX(${-lean}deg) scale(1, ${1 / stand}) translate(0px, ${step - foot}px) translate(.5px, .5px) scale(${1 / scale}) rotate(${-rotation}deg) translate(-.5px, -.5px) translate(${-x}px, ${-y}px)`;
     }
 
     SortPieces() {
-        const pieces = [...this.piecesLayer.children].sort((a, b)=> a.displayPosition.y - b.displayPosition.y);
+        const turn = this.spin * Math.PI / 180;
+        const depth = piece=> (piece.displayPosition.x - 3.5) * Math.sin(turn) + (piece.displayPosition.y - 3.5) * Math.cos(turn); //by rank, unless it's turned
+        const pieces = [...this.piecesLayer.children].sort((a, b)=> depth(a) - depth(b));
         for (let i = 0; i < pieces.length; i++) {
             if (this.piecesLayer.children[i] !== pieces[i]) { //moves only what's out of place
                 this.piecesLayer.insertBefore(pieces[i], this.piecesLayer.children[i]);
@@ -1040,7 +1130,7 @@ class Chess extends Window {
     }
 
     UpdateRefractions() {
-        const isStill = this.is3d && !this.board.classList.contains("chess-flipping") && !this.board.classList.contains("chess-tilting");
+        const isStill = this.is3d && !["chess-flipping", "chess-tilting", "chess-orbiting"].some(o=> this.board.classList.contains(o));
         const resting = [...this.piecesLayer.children];
 
         for (const piece of [...resting, ...this.liftLayer.children]) {
@@ -1208,7 +1298,47 @@ class Chess extends Window {
                 this.AddPiece(placement[x][y], { x: x, y: y });
             }
         }
-        this.SortPieces(); //added by rank, backwards when flipped
+
+        this.SortPieces();
+
+        this.ClearSelection();
+        this.ClearIndicators();
+        this.reader?.ClearHint();
+        this.MarkLastMove(lastmove);
+    }
+
+    SlidePlacement(before, after, lastmove) {
+        const pieces = [...this.piecesLayer.children, ...this.liftLayer.children];
+        const left = [], arrived = [];
+        for (let y = 0; y < 8; y++)
+            for (let x = 0; x < 8; x++) {
+                if (before[x][y] === after[x][y]) continue;
+                if (before[x][y] !== null) left.push({ type: before[x][y], element: pieces.find(o=> o.getAttribute("p") === `${x}${y}`) });
+                if (after[x][y] !== null) arrived.push({ type: after[x][y], x: x, y: y });
+            }
+
+        if (left.some(o=> !o.element)) { //the board is out of step with the history
+            this.RenderPlacement(after, lastmove);
+            return;
+        }
+
+        const color = type=> type === type.toUpperCase() ? "w" : "b";
+        for (const square of arrived) {
+            const piece = left.find(o=> o.type === square.type) ?? left.find(o=> color(o.type) === color(square.type));
+            if (piece) {
+                left.splice(left.indexOf(piece), 1);
+                this.MovePiece(piece.element, square.x, square.y);
+                if (piece.type !== square.type) this.SetPieceType(piece.element, square.type);
+            }
+            else {
+                this.AddPiece(square.type, square);
+            }
+        }
+
+        for (const piece of left)
+            piece.element.remove();
+
+        this.SortPieces();
 
         this.ClearSelection();
         this.ClearIndicators();
@@ -1295,10 +1425,15 @@ class Chess extends Window {
         piece.behindCopy = Chess.CreateSvg("use"); //the piece behind it, see UpdateRefractions
         const tint = Chess.CreateSvg("rect", { class:"chess-piece-tint", width:1, height:1 });
 
+        //in perspective, the board reflects the piece: mirrored on its foot, it stands as tall, and fades out. under the glass, over the pieces behind
+        piece.reflection = Chess.CreateSvg("g", { class:"chess-piece-reflection", transform:`translate(0, ${2 * Chess.PIECE_FOOT}) scale(1, -1)` });
+        piece.reflectionShape = Chess.CreateSvg("rect", { width:1, height:1 });
+        piece.reflection.appendChild(piece.reflectionShape);
+
         piece.copy.append(piece.boardCopy, piece.behindCopy);
         piece.refraction.appendChild(piece.copy);
         piece.glass.append(piece.refraction, tint);
-        piece.append(piece.glass, piece.hit);
+        piece.append(piece.reflection, piece.glass, piece.hit);
 
         piece.onmousedown = event => this.Piece_mousedown(event, false, piece);
         piece.addEventListener("touchstart", event => this.Piece_mousedown(event, true, piece)); //ontouch* handlers don't fire where touch is off by default, like desktop chrome
@@ -1315,6 +1450,8 @@ class Chess extends Window {
         piece.pieceName = name;
 
         piece.glass.setAttribute("mask", `url(#${this.GetPieceMask(name)})`);
+        piece.reflection.setAttribute("mask", `url(#${this.GetReflectionMask(name)})`);
+        piece.reflectionShape.setAttribute("mask", `url(#${this.GetPieceMask(name)})`);
         piece.refraction.setAttribute("filter", `url(#${this.GetPieceFilter(name, color)})`);
     }
 
@@ -1325,6 +1462,23 @@ class Chess extends Window {
         const mask = Chess.CreateSvg("mask", { id:id, maskUnits:"userSpaceOnUse", x:0, y:0, width:1, height:1, style:"mask-type:alpha" });
         mask.appendChild(Chess.CreateSvg("image", { href:`chess/${name}.svg`, width:1, height:1 }));
         this.defs.appendChild(mask);
+        return id;
+    }
+
+    //the reflection fades out a third of the way up the piece, mirrored: a third of its height in front of it
+    GetReflectionMask(name) {
+        const id = `${this.uid}-reflection-${name}`;
+        if (this.defs.querySelector(`#${id}`)) return id;
+
+        const range = Chess.PIECE_HEIGHT[name] / 3;
+        const top = Chess.PIECE_FOOT - range;
+
+        const gradient = Chess.CreateSvg("linearGradient", { id:`${id}-gradient`, gradientUnits:"userSpaceOnUse", x1:0, y1:Chess.PIECE_FOOT, x2:0, y2:top });
+        gradient.append(Chess.CreateSvg("stop", { offset:0, "stop-color":"#fff" }), Chess.CreateSvg("stop", { offset:1, "stop-color":"#fff", "stop-opacity":0 }));
+
+        const mask = Chess.CreateSvg("mask", { id:id, maskUnits:"userSpaceOnUse", x:-.5, y:top, width:2, height:range, style:"mask-type:alpha" });
+        mask.appendChild(Chess.CreateSvg("rect", { x:-.5, y:top, width:2, height:range, fill:`url(#${id}-gradient)` }));
+        this.defs.append(gradient, mask);
         return id;
     }
 
