@@ -1636,6 +1636,7 @@ class Chess extends Window {
     }
 
     RenderPlacement(placement, lastmove) {
+        this.Board_mouseleave(); //a piece held meanwhile is let go of first, it's replaced
         this.piecesLayer.textContent = "";
         this.liftLayer.textContent = "";
 
@@ -1857,6 +1858,7 @@ class Chess extends Window {
     PlayMove(p0, p1, element, promotion = null) {
         if (p0.x === p1.x && p0.y === p1.y) return;
         if (this.isClosed) return;
+        if (this.selected && this.selected !== element) this.Board_mouseleave(); //a piece held meanwhile is let go of first, this move may take it, or move it from the hand
         this.reader?.ClearHint();
 
         let isCapture = false;
