@@ -67,6 +67,7 @@ const FILES_LIST = [
 
 	"/chess/chess.js",
 	"/chess/chessreader.js",
+	"/chess/chessworker.js",
 	"/chess/chess.css",
 	"/chess/king.svg",
 	"/chess/king-light.svg",

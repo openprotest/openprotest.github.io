@@ -1,10 +1,11 @@
 class ChessReader {
     constructor(chess) {
-        this.chess = chess;
-        this.stream = null;
-        this.fen = null;      //the last position read
-        this.hintSide = null; //the side at the bottom of the shared board, until chosen
-        this.hint = null;     //the engine's move, see UpdateHint
+        this.chess       = chess;
+        this.stream      = null;
+        this.fen         = null;      //the last position read
+        this.hintSide    = null; //the side at the bottom of the shared board, until chosen
+        this.hint        = null;     //the engine's move, see UpdateHint
+        this.hintRequest = null; //the engine's pending answer, see UpdateHint
     }
 
     async Start() {
@@ -143,9 +144,10 @@ class ChessReader {
         this.UpdateHint();
     }
 
-    UpdateHint() {
+    async UpdateHint() {
         const chess = this.chess;
         this.ClearHint();
+        this.hintRequest = null; //an answer still on its way is for an earlier position or side
         if (!this.stream || !this.fen) return;
 
         if (chess.isGameOver) {
@@ -159,14 +161,15 @@ class ChessReader {
             return;
         }
 
-        let move = null;
-        try {
-            move = chess.ParseAiMove(ChessAi(chess.GetCurrentFen(), Chess.LEVEL_MAX, chess.positions.join(",")));
-        }
-        catch (ex) {
-            console.error(ex);
-        }
+        const fen = chess.GetCurrentFen();
+        const request = this.hintRequest = {};
+        this.hintText.textContent = `Engine (${name}): thinking...`;
 
+        const aiMove = await chess.AskEngine(fen, Chess.LEVEL_MAX, chess.positions.join(","));
+        if (this.hintRequest !== request || !this.stream || chess.GetCurrentFen() !== fen) return; //asked again, or stopped
+        this.hintRequest = null;
+
+        const move = chess.ParseAiMove(aiMove);
         if (!move) {
             this.hintText.textContent = `Engine (${name}): no move`;
             return;

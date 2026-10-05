@@ -349,6 +349,11 @@ class Chess extends Window {
         this.readButton = readButton; //lit while reading
         this.reader = null; //a ChessReader, while reading
 
+        this.engine = null;
+        this.engineRequests = new Map();
+        this.engineRequestId = 0;
+        this.aiRequest = null;
+
         this.win.addEventListener("keydown", event=> {
             if (event.target.closest("input, select, textarea") || this.win.querySelector(".win-dim")) return; //typing, or in a dialog
             if (event.key === "ArrowLeft") this.ShowMove(this.view - 1);
@@ -362,11 +367,11 @@ class Chess extends Window {
         setTimeout(()=> { this.AfterResize(); }, WIN.ANIME_DURATION);
         setTimeout(()=> { this.AfterResize(); }, 1000);
 
+        this.LoadGame(this.params);
+
         if (this.playerA === "ai" || this.playerB === "ai") {
-            this.InitWasmChessAi();
-        }
-        else {
-            this.LoadGame(this.params);
+            this.StartEngine(); //loading, while the player makes the first move
+            if (!this.CheckGameOver()) this.PlayAiMove(); //restored on the ai's turn, or a finished game
         }
     }
 
@@ -544,6 +549,7 @@ class Chess extends Window {
 
     Close() { //override
         this.reader?.Stop();
+        this.StopEngine();
         super.Close();
     }
 
@@ -551,14 +557,37 @@ class Chess extends Window {
         return this.playerA === "ai" && this.playerB === "ui" ? "b" : "w";
     }
 
-    InitWasmChessAi() {
-        const go = new Go();
-        WebAssembly.instantiateStreaming(fetch("chess/chess.wasm"), go.importObject).then((result) => {
-            this.LoadGame(this.params);
+    //The engine runs in a worker, see chessworker.js: a search takes up to most of a second, and the page stays
+    //responsive meanwhile. Requests are answered in order, the ones sent while it loads once it's ready.
+    StartEngine() {
+        if (this.engine) return;
 
-            go.run(result.instance);
+        this.engine = new Worker("chess/chessworker.js");
+        this.engine.onmessage = event=> {
+            const resolve = this.engineRequests.get(event.data.id);
+            this.engineRequests.delete(event.data.id);
+            resolve?.(event.data.move);
+        };
+        this.engine.onerror = event=> { //the worker failed to load: no answers
+            console.error("Chess engine:", event.message);
+            this.StopEngine();
+        };
+    }
 
-            if (!this.CheckGameOver()) this.PlayAiMove(); //restored on the ai's turn, or a finished game
+    StopEngine() {
+        this.engine?.terminate();
+        this.engine = null;
+        for (const resolve of this.engineRequests.values()) resolve(null);
+        this.engineRequests.clear();
+    }
+
+    //Resolves to the engine's move for a position, in its "e2-e4" form, or null. [positions] are the game's, for repetitions.
+    AskEngine(fen, level, positions) {
+        this.StartEngine();
+        const id = ++this.engineRequestId;
+        return new Promise(resolve=> {
+            this.engineRequests.set(id, resolve);
+            this.engine.postMessage({ id: id, fen: fen, level: level, positions: positions });
         });
     }
 
@@ -570,17 +599,20 @@ class Chess extends Window {
     PlayAiMove(delay = 500) {
         if (!this.IsAiTurn() || this.reader) return; //while reading, the board follows the shared one
 
-        setTimeout(()=> {
+        setTimeout(async ()=> {
             if (this.isClosed || this.isGameOver || this.reader) return;
             if (!this.IsAiTurn() || !this.IsLive()) return; //played by an earlier call, or showing history
 
-            let aiMove = null;
-            try {
-                aiMove = ChessAi(this.GetCurrentFen(), this.level, this.positions.join(","));
-            }
-            catch (ex) {
-                console.error(ex);
-            }
+            const fen = this.GetCurrentFen();
+            if (this.aiRequest?.fen === fen) return; //asked already, by an earlier call
+
+            const request = this.aiRequest = { fen: fen };
+            const aiMove = await this.AskEngine(fen, this.level, this.positions.join(","));
+            if (this.aiRequest !== request) return; //a game loaded meanwhile, see LoadGame
+            this.aiRequest = null;
+
+            //the board moved on while the engine searched, or it's showing history: asked again from there, see ShowMove
+            if (this.isClosed || this.isGameOver || this.reader || !this.IsLive() || this.GetCurrentFen() !== fen) return;
 
             let move = this.ParseAiMove(aiMove);
             if (!move) { //no answer, or an error from the engine. a legal move keeps the game going instead of stalling
@@ -726,6 +758,7 @@ class Chess extends Window {
         this.board.inert = false;
         this.isPromotionPending = false;
         this.positions = history.map(o=> o.fen.split(" ").slice(0, 2).join(" "));
+        this.aiRequest = null; //the ai's move of the previous game, if it's still searching, is dropped
 
         this.moveslist.textContent = "";
         for (let i = 1; i < history.length; i++)
