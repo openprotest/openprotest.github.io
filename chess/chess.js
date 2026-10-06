@@ -1105,7 +1105,7 @@ class Chess extends Window {
         if (this.selected || this.orbit) return;
 
         this.isFlipped = !this.isFlipped;
-        this.board.classList.add("chess-steering", "chess-flipping"); //no transitions. the coordinates hide while it turns
+        this.board.classList.add("chess-steering", "chess-flipping"); //the coordinates hide while it turns
         this.Layout(false);
         this.PlaceCaptures(); //they swap, with the sides
         this.spin = 180 - (-this.spin % 360 + 360) % 360; //half around, it looks as it did. in -180..180, the short way back
@@ -1147,7 +1147,7 @@ class Chess extends Window {
         };
 
         this.settling = { view: view, id: view.requestAnimationFrame(frame), done: ()=> { previous?.(); done?.(); } };
-        this.board.classList.add("chess-steering"); //no transitions, see chess.css
+        this.board.classList.add("chess-steering"); //the pieces stop refracting each other meanwhile, see UpdateRefractions
         this.UpdateRefractions();
     }
 
@@ -1159,7 +1159,6 @@ class Chess extends Window {
         this.settling = null;
         if (!isDone) return done;
 
-        this.board.getBoundingClientRect(); //the last frame in place first, or the pieces' transitions start from the one before it
         this.board.classList.remove("chess-steering");
         done();
         this.SortPieces(); //and they refract the ones behind them again, see UpdateRefractions
@@ -1192,7 +1191,7 @@ class Chess extends Window {
             }
         };
 
-        this.board.classList.add("chess-steering"); //follows the mouse, no transitions
+        this.board.classList.add("chess-steering"); //follows the mouse
         this.content.style.cursor = "grabbing";
         this.UpdateRefractions();
     }
@@ -1406,6 +1405,7 @@ class Chess extends Window {
             }
             else {
                 const d = this.ToDisplay(parseInt(p[0]), parseInt(p[1]));
+                this.StopSlide(piece); //on its way to where it was shown before
                 this.SetPieceDisplayPosition(piece, d.x, d.y);
             }
         }
@@ -1428,10 +1428,38 @@ class Chess extends Window {
 
         if (piece.parentNode === this.liftLayer && !isDragging) { //moving, or dropped where it was picked
             clearTimeout(piece.landTimer);
-            piece.landTimer = setTimeout(()=> this.LandPiece(piece), 450); //after the .4s transition
+            piece.landTimer = setTimeout(()=> this.LandPiece(piece), 450); //after the .4s slide
         }
 
-        this.SetPieceDisplayPosition(piece, d.x, d.y, 1);
+        if (isDragging || !from) this.SetPieceDisplayPosition(piece, d.x, d.y, 1);
+        else this.SlidePiece(piece, d.x, d.y);
+    }
+
+    SlidePiece(piece, x, y, scale = 1) {
+        this.StopSlide(piece);
+        const view = this.content.ownerDocument.defaultView; //popped out, it's another one
+        const x0 = piece.displayPosition.x, y0 = piece.displayPosition.y, scale0 = piece.scale ?? 1;
+        const bezier = (a, b, t)=> 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+        const start = performance.now();
+
+        const frame = now=> {
+            const time = Math.min(1, Math.max(0, (now - start) / 400));
+            let low = 0, high = 1, t = time; //the curve's t at this time
+            for (let i = 0; i < 16; i++) {
+                t = (low + high) / 2;
+                if (bezier(.2, .3, t) < time) low = t; else high = t;
+            }
+            const k = time < 1 ? bezier(.8, 1.2, t) : 1; //exactly on its square at the end, see UpdateRefractions
+            this.SetPieceDisplayPosition(piece, x0 + (x - x0) * k, y0 + (y - y0) * k, scale0 + (scale - scale0) * k);
+            piece.slide = time < 1 ? { view: view, id: view.requestAnimationFrame(frame) } : null;
+        };
+        piece.slide = { view: view, id: view.requestAnimationFrame(frame) };
+    }
+
+    StopSlide(piece) { //where it is
+        if (!piece.slide) return;
+        piece.slide.view.cancelAnimationFrame(piece.slide.id);
+        piece.slide = null;
     }
 
     SetPieceDisplayPosition(piece, x, y, scale = piece.scale ?? 1, rotation = piece.rotation ?? 0) {
@@ -1498,7 +1526,6 @@ class Chess extends Window {
         this.liftLayer.appendChild(piece);
         this.UpdateRefractions(); //the piece in front lets go of it, before it refracts the scene, that piece included
         piece.boardCopy.setAttribute("href", `#${this.uid}-scene`);
-        getComputedStyle(piece).transform;
     }
 
     LandPiece(piece) {
@@ -2484,6 +2511,7 @@ class Chess extends Window {
         this.grab = { x: point.x - piece.displayPosition.x, y: point.y - piece.displayPosition.y };
 
         this.selected = piece;
+        this.StopSlide(piece); //caught on its way, the hand takes it from there
         this.LiftPiece(this.selected); //on top of the other pieces, refracting them
         this.selected.classList.add("chess-dragging");
 

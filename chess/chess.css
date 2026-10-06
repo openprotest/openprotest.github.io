@@ -123,23 +123,8 @@
     opacity: 0;
 }
 
-.chess-piece,
-.chess-piece-copy {
-    transition: transform .4s cubic-bezier(.2,.8,.3,1.2);
-}
-
-.chess-piece.chess-dragging,
-.chess-piece.chess-dragging .chess-piece-copy {
-    transition: none;
-}
-
 .chess-flipping .chess-coord {
     opacity: 0;
-    transition: none;
-}
-
-.chess-steering .chess-piece,
-.chess-steering .chess-piece-copy {
     transition: none;
 }
 
