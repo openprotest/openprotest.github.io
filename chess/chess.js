@@ -377,14 +377,15 @@ class Chess extends Window {
 
         const fenButton = this.CreateMenuButton("Copy FEN", "url(mono/copy.svg)");
         const flipButton = this.CreateMenuButton("Flip board", "url(mono/update.svg)");
-        this.perspectiveButton = this.CreateMenuButton("Perspective", "url(mono/perspective.svg)"); //lit in perspective
+        this.perspectiveButton = this.CreateMenuButton("Perspective", "url(mono/perspective.svg)");
+        this.muteButton = this.CreateMenuButton("Mute", "url(mono/sound.svg)");
         const readButton = this.CreateMenuButton("Screen reader", "url(mono/screenrecord.svg)");
-        this.muteButton = this.CreateMenuButton("Mute", "url(mono/sound.svg)"); //its icon and tip follow the setting, see UpdateMuteButton
 
-        //spread over the bar's 250px, 2px in from either end, see chess.css
-        const buttons = [newButton, fenButton, flipButton, this.perspectiveButton, readButton, this.muteButton];
+        const buttons = [newButton, fenButton, flipButton, this.perspectiveButton, this.muteButton, readButton];
         buttons.forEach((button, i)=> button.style.left = `${Math.round(2 + i * (250 - 4 - 40) / (buttons.length - 1))}px`);
         this.menubar.append(...buttons);
+
+        readButton.style.display = args?.reader ? "initial" : "none";
 
         this.sidepanel = document.createElement("div");
         this.sidepanel.className = "chess-sidepanel";

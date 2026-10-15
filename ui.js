@@ -359,6 +359,7 @@ const MENU = {
 		{ t:"Serial console",     i:"mono/serialconsole-light.svg", g:"utilities", h:false,  f:params=> new Rs232(),  k:"recorder shot" },
 		{ t:"Encoder",            i:"mono/encoder-light.svg",       g:"utilities", h:true,   f:params=> new Encoder(params),   k:"binary hex base64 url html decode" },
 		{ t:"Chess",              i:"chess/king-light.svg",         g:"game",      h:false,  f:params=> new Chess()},
+		{ t:"Chess w/ reader",    i:"chess/king-light.svg",         g:"game",      h:true,   f:params=> new Chess({reader:true})},
 
 		{ t:"Personalize",    i:"mono/personalize-light.svg", g:"manage", h:true, f:params=> new Personalize() },
 		{ t:"Appearance",     i:"mono/tv-light.svg",          g:"manage", h:true,  f:params=> new Personalize("appearance") },
