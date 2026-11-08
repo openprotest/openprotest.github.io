@@ -385,7 +385,8 @@ class Chess extends Window {
         buttons.forEach((button, i)=> button.style.left = `${Math.round(2 + i * (250 - 4 - 40) / (buttons.length - 1))}px`);
         this.menubar.append(...buttons);
 
-        readButton.style.display = args?.reader ? "initial" : "none";
+        this.isReaderEnabled = args?.reader === true;
+        readButton.style.display = this.isReaderEnabled ? "initial" : "none";
 
         this.sidepanel = document.createElement("div");
         this.sidepanel.className = "chess-sidepanel";
@@ -893,7 +894,7 @@ class Chess extends Window {
 
     SavePosition() {
         if (!this.game.fen) return; //nothing loaded yet
-        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB, is3d: this.is3d, isMuted: this.isMuted };
+        this.params = { history: this.history, playerA: this.playerA, playerB: this.playerB, levelA: this.levelA, levelB: this.levelB, is3d: this.is3d, isMuted: this.isMuted, reader: this.isReaderEnabled };
     }
 
     IsLive() {
